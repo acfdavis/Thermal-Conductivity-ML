@@ -1,1 +1,1 @@
-# Citrine-Thermal-Conductivity-Modeling-Project
+# Thermal-Conductivity-Modeling-Project
