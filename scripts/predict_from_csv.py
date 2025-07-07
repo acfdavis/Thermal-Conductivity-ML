@@ -3,7 +3,7 @@
 import argparse
 import pandas as pd
 import joblib
-from src.features import build_features
+from src.features import featurize_data
 
 REQUIRED_COLUMNS = ["formula", "temperature", "pressure", "phase"]
 
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     df_input = pd.read_csv(args.input)
     validate_input(df_input)
 
-    X = build_features(df_input)
+    X = featurize_data(df_input)
     model = load_model(args.model)
     preds = predict(model, X)
 
