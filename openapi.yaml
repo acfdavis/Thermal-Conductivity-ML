@@ -1,0 +1,58 @@
+openapi: 3.1.0
+info:
+  title: Local VS Code Project API
+  version: 1.0.0
+servers:
+  - url: https://YOUR_NGROK_URL_HERE
+paths:
+  /project-files:
+    get:
+      summary: List files in the project
+      operationId: listFiles
+      responses:
+        "200":
+          description: A list of files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: string
+  /read-file:
+    get:
+      summary: Read the contents of a file
+      operationId: readFile
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File contents
+          content:
+            text/plain:
+              schema:
+                type: string
+  /write-file:
+    post:
+      summary: Write to a file
+      operationId: writeFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                content:
+                  type: string
+      responses:
+        "200":
+          description: Success
