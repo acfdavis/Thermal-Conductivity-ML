@@ -84,13 +84,21 @@ def parse_temperature(val):
     if pd.isnull(val):
         return np.nan
     s = str(val).lower().strip()
-    m = re.search(r"([-+]?[0-9]*\.?[0-9]+)\s*°?\s*([ck])", s)
+    # Check for Celsius, Kelvin, or Fahrenheit
+    m = re.search(r"([-+]?[0-9]*\.?[0-9]+)\s*°?\s*([ckf])", s)
     if m:
         temp = float(m.group(1)); unit = m.group(2)
-        return temp + (273.15 if unit == 'c' else 0)
+        if unit == 'c':
+            return temp + 273.15
+        elif unit == 'f':
+            return (temp - 32) * 5/9 + 273.15
+        else:  # unit == 'k'
+            return temp
+    # Check for plain number
     m2 = re.search(r"([-+]?[0-9]*\.?[0-9]+)", s)
     if m2:
         return float(m2.group(1))
+    # Check for room temperature keywords
     if "room" in s or "ambient" in s or "standard" in s:
         return 298.15
     return np.nan
