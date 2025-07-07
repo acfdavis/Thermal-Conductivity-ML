@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.inspection import permutation_importance
 from sklearn.decomposition import PCA
+from features import classify_material
 
 MODEL_COLORS = {
     "XGBoost": "#1f77b4",             # steel blue
@@ -90,6 +91,110 @@ def plot_material_class_distribution(df):
         ))
     fig.update_layout(title='Distribution of Material Classes within Each Cluster', xaxis_title='Cluster', yaxis_title='Number of Materials', barmode='stack', legend_title='Material Class')
     return fig
+
+
+def plot_cluster_crystal_structure(df):
+    """Normalized crystal structure distribution within each cluster."""
+    df_plot = df.dropna(subset=['cluster_label', 'crystal_structure']).copy()
+    df_plot['crystal_structure'] = df_plot['crystal_structure'].astype(str)
+    df_counts = df_plot.groupby(['cluster_label', 'crystal_structure']).size().reset_index(name='count')
+    df_total = df_counts.groupby('cluster_label')['count'].transform('sum')
+    df_counts['percent'] = df_counts['count'] / df_total * 100
+    fig = px.bar(
+        df_counts,
+        x='cluster_label',
+        y='percent',
+        color='crystal_structure',
+        title='Crystal Structure Composition by Cluster (Normalized)',
+        labels={'percent': 'Percentage of Materials', 'cluster_label': 'Cluster'},
+        barmode='stack',
+        category_orders={"crystal_structure": ["Cubic", "Tetragonal", "Orthorhombic", "Hexagonal", "Trigonal", "Monoclinic", "Triclinic", "Unknown"]},
+    )
+    fig.update_layout(template="plotly_white", yaxis_tickformat='.0f')
+    return fig
+
+
+def plot_cluster_chemistry_distribution(df):
+    """Normalized chemistry distribution within each cluster."""
+    df_plot = df.dropna(subset=['cluster_label', 'chemistry']).copy()
+    df_plot['chemistry'] = df_plot['chemistry'].astype(str)
+    df_counts = df_plot.groupby(['cluster_label', 'chemistry']).size().reset_index(name='count')
+    df_counts['percent'] = df_counts.groupby('cluster_label')['count'].transform(lambda x: 100 * x / x.sum())
+    fig = px.bar(
+        df_counts,
+        x='cluster_label',
+        y='percent',
+        color='chemistry',
+        barmode='stack',
+        title="Chemical Class Distribution per Cluster (Normalized)",
+        labels={'cluster_label': 'Cluster', 'percent': 'Percentage of Materials'},
+        text_auto='.1f',
+    )
+    fig.update_layout(template="plotly_white", yaxis_tickformat='.0f')
+    return fig
+
+
+def plot_structure_by_chemistry(df):
+    """Distribution of crystal structures within each chemistry class."""
+    df_struct = df.dropna(subset=['crystal_structure', 'chemistry']).copy()
+    df_struct['crystal_structure'] = df_struct['crystal_structure'].astype(str)
+    df_struct['chemistry'] = df_struct['chemistry'].astype(str)
+    df_count = df_struct.groupby(['chemistry', 'crystal_structure']).size().reset_index(name='count')
+    df_count['percent'] = df_count.groupby('chemistry')['count'].transform(lambda x: 100 * x / x.sum())
+    structure_order = ["Cubic", "Tetragonal", "Orthorhombic", "Hexagonal", "Trigonal", "Monoclinic", "Triclinic", "Unknown"]
+    fig = px.bar(
+        df_count,
+        x='chemistry',
+        y='percent',
+        color='crystal_structure',
+        title='Crystal Structure Composition per Chemistry Class (Normalized)',
+        labels={'percent': 'Percentage of Materials'},
+        category_orders={'crystal_structure': structure_order},
+        barmode='stack',
+    )
+    fig.update_layout(template="plotly_white", yaxis_tickformat='.0f')
+    return fig
+
+
+def plot_pca_material_class(X_scaled, analysis_df):
+    """3D PCA scatter colored by material class and cluster."""
+    pca = PCA(n_components=3)
+    X_pca = pca.fit_transform(X_scaled)
+    plot_df = pd.DataFrame(X_pca, columns=['PC1', 'PC2', 'PC3'], index=analysis_df.index)
+    plot_df = plot_df.join(analysis_df[['cluster', 'material_class', 'crystal_system_classified']])
+    fig = px.scatter_3d(
+        plot_df.dropna(subset=['material_class']),
+        x='PC1',
+        y='PC2',
+        z='PC3',
+        color='material_class',
+        symbol='cluster',
+        title='3D PCA of Clusters Colored by Material Class',
+        hover_data=['crystal_system_classified'],
+    )
+    return fig
+
+
+def plot_numeric_histograms(df, bins=30):
+    """Linear-scale histograms of numeric columns."""
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    ax = df[numeric_cols].hist(bins=bins, figsize=(15, 10))
+    for a in ax.flatten():
+        a.set_xlabel(a.get_xlabel(), fontsize=9)
+        a.set_ylabel('Frequency', fontsize=9)
+    return ax
+
+
+def plot_numeric_histograms_log(df, bins=30):
+    """Log-scale histograms of numeric columns."""
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df_log = df[numeric_cols].replace(0, np.nan).dropna()
+    df_log = df_log.applymap(lambda x: np.log10(x) if x > 0 else np.nan)
+    ax = df_log.hist(bins=bins, figsize=(15, 10))
+    for a in ax.flatten():
+        a.set_xlabel(a.get_xlabel(), fontsize=9)
+        a.set_ylabel('Frequency', fontsize=9)
+    return ax
 
 
 
