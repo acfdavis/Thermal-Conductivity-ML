@@ -14,6 +14,8 @@ from tqdm import tqdm
 import pandas as pd
 import joblib
 from mp_api.client import MPRester
+from sklearn.decomposition import PCA
+from data import load_and_merge_data, impute_and_clean_data
 
 
 # Load environment variables from .env file
@@ -50,19 +52,7 @@ def normalize_column_names(df):
     df.columns = [re.sub(r"[\s\[\]<>]", "_", col) for col in df.columns]
     return df
 
-def run():
-    # Your pipeline logic goes here, e.g.
-    df_raw = load_and_merge_data()
-    df_clean = impute_and_clean_data(df_raw)
-    df_features = add_composition_features(df_clean)
-    print(df_features.head())
 
-if __name__ == "__main__":
-    from multiprocessing import freeze_support
-    freeze_support()
-    run()
-
-    
 def add_materials_project_features(df, api_key):
     """
     Enriches the DataFrame with materials properties from the Materials Project,
@@ -97,7 +87,12 @@ def add_materials_project_features(df, api_key):
 
                 docs_by_formula = {}
                 for doc in docs:
-                    f = doc.formula_pretty
+                    # Ensure the dictionary structure is correct or handle missing attributes
+                    if 'formula_pretty' in doc:
+                        f = doc['formula_pretty']
+                    else:
+                        f = None
+
                     if f not in docs_by_formula or (
                         getattr(doc, 'energy_above_hull', float('inf')) <
                         getattr(docs_by_formula[f], 'energy_above_hull', float('inf'))
@@ -170,9 +165,10 @@ def featurize_data(df, composition_col='formula', cache_path=None):
     If `cache_path` is provided and exists, load the cached result.
     Otherwise, run the pipeline and save to cache (if path provided).
     """
+    import pandas as pd
     if cache_path and os.path.exists(cache_path):
         print(f"Loading cached features from {cache_path}...")
-        return joblib.load(cache_path)
+        return pd.read_parquet(cache_path)
 
     print("Starting feature engineering...")
 
@@ -181,6 +177,10 @@ def featurize_data(df, composition_col='formula', cache_path=None):
 
     df_comp = add_composition_features(df, composition_column=composition_col)
     print("Composition features added.")
+
+    # Normalize column names immediately after they are created
+    df_comp = normalize_column_names(df_comp)
+    print("Column names normalized.")
 
     api_key = os.getenv("MP_API_KEY")
     if api_key:
@@ -195,24 +195,67 @@ def featurize_data(df, composition_col='formula', cache_path=None):
     # Add chemistry column using classify_material on formula
     df_jarvis['chemistry'] = df_jarvis[composition_col].apply(classify_material)
 
-    # Add crystal_structure column
-    if 'crystal_system' in df_jarvis.columns:
-        df_jarvis['crystal_structure'] = df_jarvis['crystal_system'].fillna('Unknown')
-    elif 'MagpieData_mean_SpaceGroupNumber' in df_jarvis.columns:
-        df_jarvis['crystal_structure'] = df_jarvis['MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
-    else:
-        df_jarvis['crystal_structure'] = 'Unknown'
+    # Add crystal_structure column using a more robust approach
+    df_jarvis['crystal_structure'] = df_jarvis['MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
+
+    # Initialize the column with 'Unknown'
+    #df_jarvis['crystal_structure'] = 'Unknown'
+
+    # First, try to use the crystal_system from Materials Project if it exists
+    #if 'crystal_system' in df_jarvis.columns:
+    #    # Use .loc to avoid SettingWithCopyWarning
+    #    df_jarvis.loc[df_jarvis['crystal_system'].notna(), 'crystal_structure'] = df_jarvis['crystal_system']
+
+    # For any remaining 'Unknown' values, try to use the Magpie spacegroup number
+    #if 'MagpieData_mean_SpaceGroupNumber' in df_jarvis.columns:
+    #    # Identify rows that are still 'Unknown' and have a valid spacegroup number
+    #    unknown_mask = (df_jarvis['crystal_structure'] == 'Unknown') & (df_jarvis['MagpieData_mean_SpaceGroupNumber'].notna())
+    #    # Apply the classification function only to those rows
+    #    df_jarvis.loc[unknown_mask, 'crystal_structure'] = df_jarvis.loc[unknown_mask, 'MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
 
 
     print("Feature engineering complete.")
-    # Normalize column names
-    df_jarvis = normalize_column_names(df_jarvis)
+    
+    # Convert any special types (like Enums) to strings before caching
+    if 'crystal_system' in df_jarvis.columns:
+        df_jarvis['crystal_system'] = df_jarvis['crystal_system'].astype(str)
+
     if cache_path:
-        joblib.dump(df_jarvis, cache_path)
-        print(f"Features cached to {cache_path}.")
+        try:
+            df_jarvis.to_parquet(cache_path, index=False)
+            print(f"Features cached to {cache_path}.")
+        except Exception as e:
+            print(f"Error caching to Parquet: {e}")
+            # Fallback or further error handling can be added here
+            # For example, converting all object columns to string
+            print("Attempting to convert all object columns to string and re-caching...")
+            for col in df_jarvis.select_dtypes(include=['object']).columns:
+                df_jarvis[col] = df_jarvis[col].astype(str)
+            df_jarvis.to_parquet(cache_path, index=False)
+            print(f"Features successfully cached to {cache_path} after type conversion.")
+
 
     return df_jarvis
 
+
+
+def add_pca_features(X, n_components=5):
+    """
+    Apply PCA to the feature set and add the top principal components as new features.
+
+    Args:
+        X (pd.DataFrame): Feature matrix.
+        n_components (int): Number of principal components to retain.
+
+    Returns:
+        pd.DataFrame: Feature matrix with PCA components added.
+    """
+    pca = PCA(n_components=n_components, random_state=42)
+    pca_components = pca.fit_transform(X)
+    pca_df = pd.DataFrame(
+        pca_components, columns=[f'pca_component_{i+1}' for i in range(n_components)], index=X.index
+    )
+    return pd.concat([X, pca_df], axis=1)
 
 
 def classify_spacegroup_by_number(sg_number):

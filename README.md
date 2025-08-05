@@ -64,3 +64,47 @@ python scripts/predict_from_csv.py --model outputs/final_model.pkl --input data/
 ```
 
 The predictions will be saved in `data/predicted_kappa.csv`.
+
+## 🛠️ Workflow Overview (2025 Refactor)
+
+This project is a recruiter-ready, modular ML workflow for predicting thermal conductivity, with a focus on:
+- **Modularity:** All data, feature, modeling, and visualization logic is in `src/` modules.
+- **Reproducibility:** All notebooks/scripts use robust utility functions for environment setup, data loading/caching, plot saving, DataFrame styling, and logging.
+- **Professional Outputs:** All plots and tables are recruiter/statistician-ready, with consistent, publication-quality style.
+- **Pipeline Stages:**
+  1. **EDA:** `notebooks/1_eda.py` — Exploratory data analysis, summary statistics, and target distribution.
+  2. **Clustering & PCA:** `notebooks/2_clustering_and_pca.py` — Unsupervised clustering, PCA, and cluster analysis.
+  3. **Feature Engineering:** `notebooks/3_feature_engineering.py` — Feature creation, selection, and curation (outputs `selected_features.json`).
+  4. **Advanced Modeling:** `notebooks/4_advanced_modeling.py` — Model comparison, SHAP analysis, and decision summary.
+  5. **Hyperparameter Tuning:** `notebooks/5_hyperparameter_tuning.py` — XGBoost tuning, final model/plot artifacts, and recruiter-friendly reporting.
+
+## 🧰 Utility Functions
+
+All notebooks/scripts use standardized utilities from `src/utils.py`:
+- `setup_environment()`: Loads environment variables and sets plotting defaults.
+- `load_cached_dataframe()`: Robustly loads cached data from Parquet, Pickle, or CSV.
+- `save_plot()`: Saves Plotly or Matplotlib figures with consistent style.
+- `style_df()`: Styles DataFrames for professional, readable tables.
+- `log_and_print()`: Unified logging/printing for notebook/console.
+- `prepare_data_for_modeling()`: Standard feature/target extraction and imputation.
+
+## 📊 Plot & Table Artifacts
+
+All key plots are saved as PDFs in organized subfolders under `plots/`, using `save_plot`. Tables in notebooks are styled with `style_df` for recruiter/statistician review.
+
+## 🔄 How to Run the Workflow
+
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. **Run each notebook in order:**
+   - `notebooks/1_eda.py`
+   - `notebooks/2_clustering_and_pca.py`
+   - `notebooks/3_feature_engineering.py`
+   - `notebooks/4_advanced_modeling.py`
+   - `notebooks/5_hyperparameter_tuning.py`
+
+   Or, open in Jupyter Lab/VS Code and run cell-by-cell.
+
+3. **All outputs (plots, models, features) are saved for downstream use.**

@@ -34,14 +34,14 @@ def load_and_standardize_ucsb() -> pd.DataFrame:
     return df
 
 def _filter_thermal_conductivity_data(df_data):
-    print("Original shape:", df_data.shape)
+    print("NIST Original shape:", df_data.shape)
     
     if "property" not in df_data.columns:
         print("Missing 'property' column")
         return pd.DataFrame()
 
     conductivity_df = df_data[df_data['property'].str.contains('Thermal conductivity', case=False, na=False)]
-    print("Conductivity rows:", conductivity_df.shape)
+    print("NIST Conductivity rows:", conductivity_df.shape)
 
     if "phase" not in conductivity_df.columns:
         print("Missing 'phase' column")
@@ -50,7 +50,7 @@ def _filter_thermal_conductivity_data(df_data):
     thermal_conductivity_crystalline = conductivity_df[
         conductivity_df['phase'].str.contains('crystal', case=False, na=False)
     ]
-    print("Crystalline rows:", thermal_conductivity_crystalline.shape)
+    print("NIST Crystalline rows:", thermal_conductivity_crystalline.shape)
 
     if thermal_conductivity_crystalline.empty:
         print("No crystalline thermal conductivity data found.")
@@ -84,10 +84,15 @@ def parse_temperature(val):
     if pd.isnull(val):
         return np.nan
     s = str(val).lower().strip()
-    m = re.search(r"([-+]?[0-9]*\.?[0-9]+)\s*°?\s*([ck])", s)
+    m = re.search(r"([-+]?[0-9]*\.?[0-9]+)\s*°?\s*([ckf])", s)
     if m:
         temp = float(m.group(1)); unit = m.group(2)
-        return temp + (273.15 if unit == 'c' else 0)
+        if unit == 'c':
+            return temp + 273.15
+        elif unit == 'f':
+            return (temp - 32) * 5/9 + 273.15
+        else:
+            return temp
     m2 = re.search(r"([-+]?[0-9]*\.?[0-9]+)", s)
     if m2:
         return float(m2.group(1))
