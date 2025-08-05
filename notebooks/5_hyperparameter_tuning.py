@@ -48,7 +48,7 @@ from scipy.stats import randint, uniform
 # --- Setup environment and paths ---
 setup_environment()
 USE_CLUSTER_FEATURES = False
-CACHE_PATH = '../data/processed/featurized.pkl'
+CACHE_PATH = '../data/processed/featurized.parquet'
 SELECTED_FEATURES_PATH = '../data/processed/selected_features_xgb.json'
 FINAL_MODEL_PATH = '../models/tuned_xgboost_model.joblib'
 PLOTS_DIR = '../plots/5_hyperparameter_tuning'

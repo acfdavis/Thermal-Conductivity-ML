@@ -104,7 +104,7 @@ XGB_SHAP_PATH = os.path.join(PLOTS_DIR, 'adv_model_xgb_shap.pdf')
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
 # --- Load featurized data using robust utility ---
-CACHE_PATH = '../data/processed/featurized.pkl'
+CACHE_PATH = '../data/processed/featurized.parquet'
 df = load_or_process_dataframe(cache_path=CACHE_PATH)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 style_df(df.head())

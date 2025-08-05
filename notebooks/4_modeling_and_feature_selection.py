@@ -66,7 +66,7 @@ from features import add_pca_features
 
 # --- Setup environment and paths ---
 setup_environment()
-CACHE_PATH = '../data/processed/featurized.pkl'
+CACHE_PATH = '../data/processed/featurized.parquet'
 PLOTS_DIR = '../plots/4_modeling_and_feature_selection'
 os.makedirs(PLOTS_DIR, exist_ok=True)
 BASELINE_IMP_PATH = os.path.join(PLOTS_DIR, 'feat_eng_baseline_importance.pdf')

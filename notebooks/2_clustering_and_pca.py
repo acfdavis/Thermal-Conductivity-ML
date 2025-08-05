@@ -36,6 +36,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 from sklearn.impute import SimpleImputer
 import plotly.graph_objects as go
 
@@ -136,25 +137,34 @@ fig_pca_variance.show()
 #
 # ### Determining the Optimal Number of Clusters
 #
-# We use the **silhouette score** to determine the optimal number of clusters (`k`). The silhouette score measures how similar an object is to its own cluster compared to other clusters. A higher score indicates better-defined clusters.
+# We use the **silhouette score** to determine the optimal number of clusters (`k`) and compare it against the elbow method for additional context. The silhouette score measures how similar an object is to its own cluster compared to other clusters. A higher score indicates better-defined clusters.
 
 # %%
 # Convert range to list for plotly compatibility
 k_range = list(range(2, 30))
 
-# Calculate inertia values for the range of k
+# Calculate inertia values for the range of k (elbow method)
 inertia_values = get_inertia_values(X_pca, k_range)
-
-# Find the optimal k using the elbow method
 optimal_k_elbow = find_elbow_point(inertia_values, k_range)
 log_and_print(f"Optimal k determined using the elbow method: {optimal_k_elbow}")
 
-# Plot elbow method for inertia using the updated function in viz.py
 fig_elbow_inertia = plot_elbow_inertia_with_marker(inertia_values, k_range, optimal_k_elbow)
-# Save and display the updated elbow plot
 save_plot(fig_elbow_inertia, os.path.join(PLOTS_DIR, 'elbow_method_inertia_with_marker.pdf'))
 fig_elbow_inertia.show()
-log_and_print("Updated elbow method plot to include optimal_k_elbow marker.")
+
+# Calculate silhouette scores for the range of k
+silhouette_scores = []
+for k in k_range:
+    kmeans_tmp = KMeans(n_clusters=k, random_state=42, n_init=10)
+    labels = kmeans_tmp.fit_predict(X_pca)
+    silhouette_scores.append(silhouette_score(X_pca, labels))
+optimal_k_silhouette = k_range[int(np.argmax(silhouette_scores))]
+log_and_print(f"Optimal k determined using silhouette score: {optimal_k_silhouette}")
+
+fig_silhouette = go.Figure(data=go.Scatter(x=k_range, y=silhouette_scores, mode='lines+markers'))
+fig_silhouette.update_layout(title='Silhouette Scores for k', xaxis_title='Number of Clusters (k)', yaxis_title='Silhouette Score')
+save_plot(fig_silhouette, SILHOUETTE_PATH)
+fig_silhouette.show()
 
 # %% [markdown]
 # ### Fitting the K-Means Model
@@ -162,12 +172,12 @@ log_and_print("Updated elbow method plot to include optimal_k_elbow marker.")
 # Based on the silhouette analysis, we select the optimal `k` and fit the K-Means algorithm to the PCA-transformed data.
 
 # %%
-# Assign optimal_k_elbow to N_CLUSTERS for further use
-N_CLUSTERS = optimal_k_elbow
+# Assign silhouette-based optimal k to N_CLUSTERS for further use
+N_CLUSTERS = optimal_k_silhouette
 
 # Ensure N_CLUSTERS is an integer and not None
 if N_CLUSTERS is None:
-    raise ValueError("N_CLUSTERS (optimal_k_elbow) is None. Please check the elbow finding logic.")
+    raise ValueError("N_CLUSTERS (optimal_k_silhouette) is None. Please check the silhouette calculation.")
 
 # Fit KMeans on the PCA-reduced data for efficiency and robustness
 kmeans = KMeans(n_clusters=int(N_CLUSTERS), random_state=42, n_init=10)

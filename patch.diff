@@ -1,241 +1,63 @@
- (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
-diff --git a/src/viz.py b/src/viz.py
-index a71ce84f54474984299a04f907a16f7f0717700e..0b856f45e72a12d5d5f369ada3e7d095654ffd6a 100644
---- a/src/viz.py
-+++ b/src/viz.py
-@@ -1,33 +1,36 @@
--import plotly.graph_objects as go
--import plotly.express as px
--from plotly.subplots import make_subplots
--import numpy as np
--import pandas as pd
--from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
--from sklearn.inspection import permutation_importance
--from sklearn.decomposition import PCA
-+import plotly.graph_objects as go
-+import plotly.express as px
-+from plotly.subplots import make_subplots
-+import numpy as np
-+import pandas as pd
-+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-+from sklearn.inspection import permutation_importance
-+from sklearn.decomposition import PCA
-+# Importing classify_material can require heavy dependencies (e.g. matminer).
-+# To keep lightweight utilities usable without those packages installed, the
-+# import is performed lazily inside functions that require it.
+#cat patch.diff
+#git apply --stat patch.diff       # shows which files will be changed
+#git apply --check patch.diff      # verifies patch can apply cleanly
+#git apply patch.diff
+
+
+diff --git a/notebooks/5_hyperparameter_tuning.py b/notebooks/5_hyperparameter_tuning.py
+index f913496c6edf0fddc000bb5d83695ad559c60e4b..6f76936c50a05f6c407b6fae082e37dfa38fff7f 100644
+--- a/notebooks/5_hyperparameter_tuning.py
++++ b/notebooks/5_hyperparameter_tuning.py
+@@ -26,51 +26,51 @@
+ import os, sys
+ SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+ if SRC_PATH not in sys.path:
+     sys.path.insert(0, SRC_PATH)
  
- MODEL_COLORS = {
-     "XGBoost": "#1f77b4",             # steel blue
-     "Random Forest": "#3C9D3C",       # forest green
-     "Gradient Boosting": "#9467bd",  # purple
-     "SVR": "#FFA94D"                  # soft orange
- }
+ from utils import (
+     setup_environment, load_or_process_dataframe, save_plot, style_df, prepare_data_for_modeling, log_and_print
+ )
+ from modeling import split_data, scale_features, apply_power_transform, evaluate_model
+ from viz import plot_parity_logscale
+ import pandas as pd
+ import numpy as np
+ import json
+ import joblib
+ from sklearn.ensemble import RandomForestRegressor
+ from xgboost import XGBRegressor
+ import shap
+ import matplotlib.pyplot as plt
+ from IPython.display import display
+ from sklearn.model_selection import RandomizedSearchCV
+ from scipy.stats import randint, uniform
  
- def plot_pca_variance(pca):
-     """Plots the cumulative explained variance of PCA components."""
-     exp_var_cumul = np.cumsum(pca.explained_variance_ratio_)
-     fig = px.area(
-         x=range(1, exp_var_cumul.shape[0] + 1),
-         y=exp_var_cumul,
-         labels={"x": "# Components", "y": "Explained Variance"}
-     )
-     fig.update_layout(title_text="PCA Explained Variance")
-     return fig
+ # --- Setup environment and paths ---
+ setup_environment()
+ USE_CLUSTER_FEATURES = False
+-CACHE_PATH = '../data/processed/featurized.pkl'
++CACHE_PATH = '../data/processed/featurized.parquet'
+ SELECTED_FEATURES_PATH = '../data/processed/selected_features_xgb.json'
+ FINAL_MODEL_PATH = '../models/tuned_xgboost_model.joblib'
+ PLOTS_DIR = '../plots/5_hyperparameter_tuning'
+ os.makedirs(PLOTS_DIR, exist_ok=True)
+ PARITY_PLOT_PATH = os.path.join(PLOTS_DIR, 'tuned_xgb_model_parity_plot.pdf')
+ SHAP_PLOT_PATH = os.path.join(PLOTS_DIR, 'tuned_xgb_model_shap_summary.pdf')
  
- def plot_elbow_method(X_scaled):
-     """Plot the elbow curve for K-Means clustering."""
-     from sklearn.cluster import KMeans
-     inertia = []
-     K = range(1, 11)
-     for k in K:
-diff --git a/src/viz.py b/src/viz.py
-index a71ce84f54474984299a04f907a16f7f0717700e..0b856f45e72a12d5d5f369ada3e7d095654ffd6a 100644
---- a/src/viz.py
-+++ b/src/viz.py
-@@ -53,65 +56,178 @@ def plot_clusters(X_scaled, cluster_labels, formula_list, n_clusters):
-             name=f'Cluster {i}',
-             text=formula_list, # Add formula for hover info
-             hoverinfo='text'
-         ))
-     fig_2d.update_layout(title='2D PCA of Clusters', xaxis_title='Principal Component 1', yaxis_title='Principal Component 2', legend_title='Cluster')
-     
-     pca_3d = PCA(n_components=3)
-     X_pca_3d = pca_3d.fit_transform(X_scaled)
-     df_pca_3d = pd.DataFrame(data=X_pca_3d, columns=['PCA1', 'PCA2', 'PCA3'])
-     df_pca_3d['Cluster'] = cluster_labels
+ # --- Load featurized data using robust utility ---
+ df = load_or_process_dataframe(cache_path=CACHE_PATH)
+ log_and_print(f"Featurized dataframe shape: {df.shape}")
  
-     fig_3d = go.Figure()
-     for i in range(n_clusters):
-         fig_3d.add_trace(go.Scatter3d(
-             x=df_pca_3d[df_pca_3d['Cluster'] == i]['PCA1'],
-             y=df_pca_3d[df_pca_3d['Cluster'] == i]['PCA2'],
-             z=df_pca_3d[df_pca_3d['Cluster'] == i]['PCA3'],
-             mode='markers',
-             name=f'Cluster {i}',
-             text=formula_list, # Add formula for hover info
-             hoverinfo='text'
-         ))
-     fig_3d.update_layout(title='3D PCA of Clusters', scene=dict(xaxis_title='Principal Component 1', yaxis_title='Principal Component 2', zaxis_title='Principal Component 3'), legend_title='Cluster')
-     return fig_2d, fig_3d
+ # %% [markdown]
+ # ## 1. Load and Prepare Data
+ # 
+ # We load the same featurized data and the list of selected features to ensure consistency with the modeling notebook.
  
--def plot_material_class_distribution(df):
--    """Plot the distribution of material classes within each cluster."""
--    df['material_class'] = df['formula'].apply(classify_material)
-+def plot_material_class_distribution(df):
-+    """Plot the distribution of material classes within each cluster."""
-+    # Import here to avoid heavy dependencies unless needed
-+    from features import classify_material
-+
-+    df = df.copy()
-+    df['material_class'] = df['formula'].apply(classify_material)
-     cluster_material_distribution = df.groupby(['cluster_labels', 'material_class']).size().unstack(fill_value=0)
+ # %%
+ # Prepare data for modeling
+ X, y = prepare_data_for_modeling(df, target_col='thermal_conductivity')
  
-     fig = go.Figure()
-     for material_class in cluster_material_distribution.columns:
-         fig.add_trace(go.Bar(
-             x=cluster_material_distribution.index,
-             y=cluster_material_distribution[material_class],
-             name=material_class,
-             hovertemplate='Cluster: %{x}<br>Class: '+material_class+'<br>Count: %{y}<extra></extra>'
-         ))
--    fig.update_layout(title='Distribution of Material Classes within Each Cluster', xaxis_title='Cluster', yaxis_title='Number of Materials', barmode='stack', legend_title='Material Class')
--    return fig
-+    fig.update_layout(title='Distribution of Material Classes within Each Cluster', xaxis_title='Cluster', yaxis_title='Number of Materials', barmode='stack', legend_title='Material Class')
-+    return fig
-+
-+
-+def plot_cluster_crystal_structure(df):
-+    """Normalized crystal structure distribution within each cluster."""
-+    df_plot = df.dropna(subset=['cluster_label', 'crystal_structure']).copy()
-+    df_plot['crystal_structure'] = df_plot['crystal_structure'].astype(str)
-+    df_counts = df_plot.groupby(['cluster_label', 'crystal_structure']).size().reset_index(name='count')
-+    df_total = df_counts.groupby('cluster_label')['count'].transform('sum')
-+    df_counts['percent'] = df_counts['count'] / df_total * 100
-+    fig = px.bar(
-+        df_counts,
-+        x='cluster_label',
-+        y='percent',
-+        color='crystal_structure',
-+        title='Crystal Structure Composition by Cluster (Normalized)',
-+        labels={'percent': 'Percentage of Materials', 'cluster_label': 'Cluster'},
-+        barmode='stack',
-+        category_orders={"crystal_structure": ["Cubic", "Tetragonal", "Orthorhombic", "Hexagonal", "Trigonal", "Monoclinic", "Triclinic", "Unknown"]},
-+    )
-+    fig.update_layout(template="plotly_white", yaxis_tickformat='.0f')
-+    return fig
-+
-+
-+def plot_cluster_chemistry_distribution(df):
-+    """Normalized chemistry distribution within each cluster."""
-+    df_plot = df.dropna(subset=['cluster_label', 'chemistry']).copy()
-+    df_plot['chemistry'] = df_plot['chemistry'].astype(str)
-+    df_counts = df_plot.groupby(['cluster_label', 'chemistry']).size().reset_index(name='count')
-+    df_counts['percent'] = df_counts.groupby('cluster_label')['count'].transform(lambda x: 100 * x / x.sum())
-+    fig = px.bar(
-+        df_counts,
-+        x='cluster_label',
-+        y='percent',
-+        color='chemistry',
-+        barmode='stack',
-+        title="Chemical Class Distribution per Cluster (Normalized)",
-+        labels={'cluster_label': 'Cluster', 'percent': 'Percentage of Materials'},
-+        text_auto='.1f',
-+    )
-+    fig.update_layout(template="plotly_white", yaxis_tickformat='.0f')
-+    return fig
-+
-+
-+def plot_structure_by_chemistry(df):
-+    """Distribution of crystal structures within each chemistry class."""
-+    df_struct = df.dropna(subset=['crystal_structure', 'chemistry']).copy()
-+    df_struct['crystal_structure'] = df_struct['crystal_structure'].astype(str)
-+    df_struct['chemistry'] = df_struct['chemistry'].astype(str)
-+    df_count = df_struct.groupby(['chemistry', 'crystal_structure']).size().reset_index(name='count')
-+    df_count['percent'] = df_count.groupby('chemistry')['count'].transform(lambda x: 100 * x / x.sum())
-+    structure_order = ["Cubic", "Tetragonal", "Orthorhombic", "Hexagonal", "Trigonal", "Monoclinic", "Triclinic", "Unknown"]
-+    fig = px.bar(
-+        df_count,
-+        x='chemistry',
-+        y='percent',
-+        color='crystal_structure',
-+        title='Crystal Structure Composition per Chemistry Class (Normalized)',
-+        labels={'percent': 'Percentage of Materials'},
-+        category_orders={'crystal_structure': structure_order},
-+        barmode='stack',
-+    )
-+    fig.update_layout(template="plotly_white", yaxis_tickformat='.0f')
-+    return fig
-+
-+
-+def plot_pca_material_class(X_scaled, analysis_df):
-+    """3D PCA scatter colored by material class and cluster."""
-+    pca = PCA(n_components=3)
-+    X_pca = pca.fit_transform(X_scaled)
-+    plot_df = pd.DataFrame(X_pca, columns=['PC1', 'PC2', 'PC3'], index=analysis_df.index)
-+    plot_df = plot_df.join(analysis_df[['cluster', 'material_class', 'crystal_system_classified']])
-+    fig = px.scatter_3d(
-+        plot_df.dropna(subset=['material_class']),
-+        x='PC1',
-+        y='PC2',
-+        z='PC3',
-+        color='material_class',
-+        symbol='cluster',
-+        title='3D PCA of Clusters Colored by Material Class',
-+        hover_data=['crystal_system_classified'],
-+    )
-+    return fig
-+
-+
-+def plot_numeric_histograms(df, bins=30):
-+    """Linear-scale histograms of numeric columns."""
-+    import matplotlib.pyplot as plt
-+
-+    numeric_cols = df.select_dtypes(include=[np.number]).columns
-+    ax = df[numeric_cols].hist(bins=bins, figsize=(15, 10))
-+    for a in ax.flatten():
-+        a.set_xlabel(a.get_xlabel(), fontsize=9)
-+        a.set_ylabel("Frequency", fontsize=9)
-+    plt.tight_layout()
-+    return ax
-+
-+
-+def plot_numeric_histograms_log(df, bins=30):
-+    """Log-scale histograms of numeric columns."""
-+    import matplotlib.pyplot as plt
-+
-+    numeric_cols = df.select_dtypes(include=[np.number]).columns
-+    df_log = df[numeric_cols].applymap(lambda x: np.log10(x) if x > 0 else np.nan)
-+    ax = df_log.hist(bins=bins, figsize=(15, 10))
-+    for a in ax.flatten():
-+        a.set_xlabel(a.get_xlabel(), fontsize=9)
-+        a.set_ylabel("Frequency", fontsize=9)
-+    plt.tight_layout()
-+    return ax
- 
- 
- 
- 
- 
- def add_subplot_border(fig, row, col, rows=2, cols=2, color="#2A9D8F", width=2):
-     # Calculate the domain for the subplot
-     x0 = (col - 1) / cols
-     x1 = col / cols - 0.025
-     y0 = 1 - row / rows + 0.025
-     y1 = 1 - (row - 1) / rows 
-     fig.add_shape(
-         type="rect",
-         xref="paper", yref="paper",
-         x0=x0, x1=x1, y0=y0, y1=y1,
-         line=dict(color=color, width=width),
-         layer="above"
-     )
- 
- def plot_parity_logscale(model, X_test, y_test_log, model_name):
-     
-     y_pred = model.predict(X_test)
-     fig = go.Figure()
-     fig.add_trace(go.Scatter(
-         x=y_test_log, y=y_pred,
- 
-EOF
-)
+ # %%
+ # Conditionally add cluster features based on the flag
+ if USE_CLUSTER_FEATURES:
+     log_and_print("Generating cluster features...")
+     from sklearn.preprocessing import StandardScaler
