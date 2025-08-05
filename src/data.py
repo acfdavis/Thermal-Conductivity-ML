@@ -96,6 +96,7 @@ def parse_temperature(val):
     m2 = re.search(r"([-+]?[0-9]*\.?[0-9]+)", s)
     if m2:
         return float(m2.group(1))
+    # Check for room temperature keywords
     if "room" in s or "ambient" in s or "standard" in s:
         return 298.15
     return np.nan
