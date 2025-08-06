@@ -5,27 +5,29 @@
 # %%
 # ## Workflow Overview
 # 
-# This notebook follows these steps:
-# 1. **Load Featurized Data:** Load the complete, featurized dataset.
-# 2. **Identify Best Model:** Start with the best-performing model from the previous notebook (XGBoost).
-# 3. **Baseline Performance:** Re-establish the baseline performance of the model on the full, scaled feature set.
-# 4. **Feature Selection:** Apply a systematic feature selection process to remove redundant or uninformative features.
-# 5. **Feature Engineering:** Add K-Means cluster labels as a new feature to see if it improves model performance.
-# 6. **Model Comparison:** Compare the performance of the XGBoost model across three conditions:
-#     - Full feature set (scaled)
-#     - Selected feature set (scaled, no clusters)
-#     - Selected feature set (scaled, with clusters)
-# 7. **Interpretability:** Use SHAP to analyze the final, best-performing model.
+# This notebook follows a systematic process to refine our feature set and finalize the model architecture:
+# 1.  **Load Featurized Data:** Load the complete, featurized dataset from the previous step.
+# 2.  **Establish Baseline:** Re-establish the performance of the best-performing model (XGBoost) on the full, scaled feature set. This serves as our benchmark.
+# 3.  **Systematic Feature Selection:** Apply a feature selection process to remove redundant or uninformative features, creating a more parsimonious model.
+# 4.  **Hypothesis Testing with Cluster Features:** Test the hypothesis that K-Means cluster labels, derived during EDA, can improve model performance by adding them to the selected feature set.
+# 5.  **Comparative Analysis:** Rigorously compare the performance of the XGBoost model across three distinct feature sets:
+#     - The full, original feature set.
+#     - The reduced set after feature selection.
+#     - The feature-selected set augmented with cluster labels.
+# 6.  **Data-Driven Conclusion:** Analyze the results to select the final, optimal feature set.
+# 7.  **Interpretability Analysis:** Use SHAP to analyze and interpret the final, best-performing model, ensuring the feature importances are physically meaningful.
 # 
-# *This notebook builds upon the model comparison performed previously, focusing on optimizing our best model.*
+# *This notebook focuses on the critical step of moving from a broad model comparison to a refined, optimized, and interpretable final model.*
 
 # %%
-# # Feature Selection and Engineering for the Best Model
+# # 4. Feature Selection and Final Model Refinement
 # 
 # **Author:** Angela Davis
 # **Date:** June 30, 2025
 # 
-# This notebook takes the best model from our multi-model comparison (XGBoost) and applies a rigorous feature selection and engineering workflow. The goal is to determine if we can create a more robust, interpretable, and potentially more accurate model by curating the feature set. We will compare the model's performance with and without feature selection, and with and without the addition of cluster labels derived from our EDA.
+# This notebook marks the final stage of model development before hyperparameter tuning. We take the best-performing architecture from our multi-model comparison (XGBoost) and apply a rigorous feature selection workflow. The primary goal is to create a more parsimonious and interpretable model by systematically removing non-informative features.
+# 
+# We will also conduct a data-driven test of a key hypothesis from our exploratory analysis: do the K-Means cluster labels add predictive value? By comparing the performance of models with and without these cluster features, we can make a final, evidence-based decision on the optimal feature set to carry forward.
 
 # %%
 # --- Professionalized Imports and Setup ---
@@ -35,9 +37,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+# --- Define Project Root for Robust Pathing ---
+# This block ensures that paths are correct whether running as a script or interactively
+try:
+    # Assumes the script is in the 'notebooks' directory
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+except NameError:
+    # Fallback for interactive environments (Jupyter, VSCode)
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.getcwd()))
+
+# Add the 'src' directory to the Python path
+SRC_PATH = os.path.join(PROJECT_ROOT, 'src')
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
+
 from IPython.display import display
 from utils import (
     setup_environment, 
@@ -64,10 +77,10 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from scipy import stats
 from features import add_pca_features
 
-# --- Setup environment and paths ---
+# --- Setup environment and paths using Project Root ---
 setup_environment()
-CACHE_PATH = '../data/processed/featurized.parquet'
-PLOTS_DIR = '../plots/4_modeling_and_feature_selection'
+CACHE_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'featurized.parquet')
+PLOTS_DIR = os.path.join(PROJECT_ROOT, 'plots', '4_modeling_and_feature_selection')
 os.makedirs(PLOTS_DIR, exist_ok=True)
 BASELINE_IMP_PATH = os.path.join(PLOTS_DIR, 'feat_eng_baseline_importance.pdf')
 FINAL_PARITY_PATH = os.path.join(PLOTS_DIR, 'feat_eng_final_parity.pdf')
@@ -84,9 +97,9 @@ style_df(df.head())
 X, y = prepare_data_for_modeling(df, target_col='thermal_conductivity')
 
 # %% [markdown]
-# ## 2. Baseline Model Performance (Full Features)
+# ## 2. Baseline Model Performance (All Features)
 # 
-# We begin by re-establishing the baseline performance for our chosen model, XGBoost, using all engineered features. This result serves as the benchmark to beat.
+# We begin by re-establishing the baseline performance for our chosen model, XGBoost, using all engineered features from the `matminer` library. This result, derived from the full feature set, serves as the benchmark we aim to improve upon through feature selection. Any refined model must outperform this baseline to be considered an improvement.
 
 # %%
 
@@ -104,9 +117,11 @@ baseline_model, baseline_results = train_and_evaluate_model(
 log_and_print('Baseline Model Performance (All Features, Scaled):')
 log_and_print(f"R²: {baseline_results['log']['r2']:.3f}, MAE: {baseline_results['log']['mae']:.3f}, RMSE: {baseline_results['log']['rmse']:.3f}")
 # %% [markdown]
-# ### 3. Incorporating EDA Insights: Adding Cluster Labels as a Feature
+# ### 3. Hypothesis Testing: Do Cluster Labels Improve Performance?
 # 
-# Now, we will create a version of our feature set that includes the K-Means cluster labels discovered during EDA. This will allow us to test if these clusters provide valuable information for the model.
+# During our Exploratory Data Analysis (EDA), we identified distinct clusters of materials based on their chemical properties. A key hypothesis from this discovery is that these cluster assignments could serve as a valuable categorical feature, helping the model distinguish between different families of materials.
+# 
+# Here, we will explicitly test this hypothesis. We add the K-Means cluster labels (with k=9, the optimal number found previously) to our dataset as one-hot encoded features. This will allow us to directly compare model performance with and without this engineered feature and make a data-driven decision on its inclusion.
 
 # %%
 # We need to work with the numeric features for clustering
@@ -134,9 +149,16 @@ log_and_print("Successfully added one-hot encoded cluster labels as features.")
 display(style_df(X_with_clusters.head()))
 
 
-# ## 4. Feature Selection and Model Comparison
+# ## 4. Feature Selection and Comparative Modeling
 # 
-# Now, we apply our feature selection strategy to both the original and cluster-enhanced datasets. We will train a Random Forest model on each and compare their performance against the baseline.
+# With our baseline and cluster-augmented datasets prepared, we can now proceed with a systematic evaluation. We will apply a feature selection algorithm to both datasets to create more parsimonious models.
+# 
+# We will then train our XGBoost model on three distinct datasets and compare their performance:
+# 1.  **Baseline:** All features, scaled.
+# 2.  **Selected Features (No Clusters):** A reduced feature set after selection, scaled.
+# 3.  **Selected Features (With Clusters):** The reduced set, augmented with cluster labels, scaled.
+# 
+# This three-way comparison will provide a clear, evidence-based answer to which feature set yields the best model.
 
 # %%
 # --- Feature Selection without Clusters ---
@@ -176,16 +198,17 @@ log_and_print(f"R²: {results_selected_with_clusters['log']['r2']:.3f}, MAE: {re
 # Save the final selected features (from the best performing model: no clusters)
 import json
 selected_features_list = X_selected_no_clusters.columns.tolist()
-selected_features_path = '../data/processed/selected_features_xgb.json'
+selected_features_path = os.path.join(PROJECT_ROOT, 'data/processed', 'selected_features_xgb.json')
+
 with open(selected_features_path, 'w') as f:
     json.dump(selected_features_list, f, indent=4)
 log_and_print(f"\nSaved {len(selected_features_list)} selected feature names (no clusters) to {selected_features_path}")
 
 
 # %%
-# ## 4. Model Performance Comparison
+# ## 5. Results: Comparative Analysis
 # 
-# The table below compares the model’s predictive performance at each stage of the workflow.
+# The table below summarizes the predictive performance for each of the three models. We will use these results to select the optimal feature set for our final model.
 
 # %%
 # --- Model Performance Comparison Table ---
@@ -203,26 +226,30 @@ results_df.to_csv(comparison_table_path, index=True)
 log_and_print(f"Comparison table saved as {comparison_table_path}")
 
 # %%
-# ## 8. Model Interpretability with SHAP
+# ## 6. Interpreting the Final Model with SHAP
 # 
-# We use SHAP (SHapley Additive exPlanations) to interpret the impact of each feature on the predictions of our final, optimized model (XGBoost with selected features).
+# Having identified the best-performing model (XGBoost with a selected feature set, without cluster labels), we now use SHAP (SHapley Additive exPlanations) to interpret its behavior. This analysis is crucial to validate that the model has learned physically meaningful relationships and to understand which features are driving its predictions.
 
 # %%
 import shap
 
-# Use TreeExplainer for the model trained on selected features
-explainer = shap.TreeExplainer(selected_model)
-shap_values = explainer.shap_values(X_train_scaled_sel_wc) # Use scaled test set for selected features
+# Based on the comparison, the model with selected features and NO clusters performed best.
+# We will use that model for interpretation.
+final_model_for_interpretation = model_sel_nc
+X_train_for_interpretation = X_train_scaled_sel_nc
+
+explainer = shap.TreeExplainer(final_model_for_interpretation)
+shap_values = explainer.shap_values(X_train_for_interpretation)
 
 # Summary plot (global feature importance)
-shap.summary_plot(shap_values, X_train_scaled_sel_wc, plot_type="bar", show=False)
-plt.title('SHAP Feature Importance (After Selection)')
+shap.summary_plot(shap_values, X_train_for_interpretation, plot_type="bar", show=False)
+plt.title('SHAP Feature Importance (Final Model)')
 plt.savefig(SHAP_BAR_PATH, bbox_inches='tight')
 plt.show()
 print(f"SHAP bar plot saved to {SHAP_BAR_PATH}")
 
 # Beeswarm plot (distribution of impacts)
-shap.summary_plot(shap_values, X_train_scaled_sel_wc, show=False)
+shap.summary_plot(shap_values, X_train_for_interpretation, show=False)
 plt.title('SHAP Feature Importance (Beeswarm)')
 plt.savefig(SHAP_BEESWARM_PATH, bbox_inches='tight')
 plt.show()
@@ -230,24 +257,25 @@ print(f"SHAP beeswarm plot saved to {SHAP_BEESWARM_PATH}")
 
 # Dependence plot for top feature
 # Ensure columns are converted to a list before indexing
-columns_list = X_train_scaled_sel_wc.columns.tolist()
+columns_list = X_train_for_interpretation.columns.tolist()
 top_feature_name = columns_list[np.argmax(np.abs(shap_values).mean(axis=0))]
 
-shap.dependence_plot(top_feature_name, shap_values, X_train_scaled_sel_wc, show=False)
+shap.dependence_plot(top_feature_name, shap_values, X_train_for_interpretation, show=False)
 plt.title(f'SHAP Dependence Plot: {top_feature_name}')
 plt.savefig(SHAP_DEPENDENCE_PATH, bbox_inches='tight')
 plt.show()
 print(f"SHAP dependence plot saved to {SHAP_DEPENDENCE_PATH}")
 
 # %% [markdown]
-# ## 9. Final Model Validation
+# ## 7. Final Model Validation
 # 
-# To visually confirm the performance of our final model, we generate a parity plot for the model trained on the selected features with clusters. This plot shows the relationship between the model's predictions and the actual experimental values.
+# To visually confirm the performance of our final chosen model (XGBoost with selected features, no clusters), we generate a parity plot. This plot shows the relationship between the model's predictions and the actual experimental values, providing a clear visual assessment of its accuracy.
 
 # %%
 from viz import plot_parity_logscale
 
-fig = plot_parity_logscale(selected_model, X_test_scaled_sel_wc, y_test_log_sel_wc, 'XGBoost with Selected Features (Scaled)')
+# Use the best model (selected features, no clusters) for the final validation plot
+fig = plot_parity_logscale(model_sel_nc, X_test_scaled_sel_nc, y_test_log_sel_nc, 'Final XGBoost Model (Selected Features)')
 fig.write_image(FINAL_PARITY_PATH)
 fig.show()
 print(f"Final parity plot saved to {FINAL_PARITY_PATH}")
@@ -255,17 +283,19 @@ print(f"Final parity plot saved to {FINAL_PARITY_PATH}")
 # %%
 # ## Summary & Interpretation
 # 
-# This notebook has successfully executed a comprehensive feature selection and engineering workflow on our best-performing model, XGBoost. The key outcomes are:
+# This notebook executed a critical, data-driven workflow to refine our model. By systematically evaluating different feature sets, we have arrived at an optimized configuration for our XGBoost model.
 # 
-# - **Performance Improvement:** A rigorous feature selection process—removing features with high missingness, low variance, and high correlation—followed by the addition of cluster features, led to a meaningful improvement in model performance. The R² increased from the baseline, demonstrating that a simpler, more robust model can be more accurate.
+# ### Key Findings:
 # 
-# - **Feature Set Curation:** The primary artifact produced by this notebook is the `selected_features_xgb.json` file. This file contains the list of curated features that have been validated to produce the highest-performing model. This artifact ensures that the final hyperparameter tuning step uses a consistent, high-quality feature set.
+# -   **Feature Selection is Crucial:** The model trained on a systematically reduced feature set (`Selected Features (No Clusters)`) outperformed the baseline model that used all available features. This demonstrates the value of removing redundant and uninformative features, leading to a more parsimonious model without sacrificing—and in this case, even improving—predictive accuracy.
 # 
-# - **Key Features Identified:** SHAP analysis highlighted physically meaningful features related to atomic volume, temperature, and electronic structure, as well as the importance of certain material clusters, confirming that the model has learned relevant structure-property relationships.
+# -   **Cluster Features Did Not Add Value:** Our hypothesis that K-Means cluster labels would improve performance was rigorously tested and disproven. The model including cluster labels performed worse than the model with only the selected feature set. This is a valuable finding, as it prevents unnecessary complexity in the final model and confirms that the primary engineered features already capture the essential information.
 # 
-# **Next Steps:**
+# -   **Final Feature Set Determined:** Based on these results, we have made the data-driven decision to proceed with the feature set produced by the `select_features` function, without the addition of cluster labels. The final list of features is saved to `selected_features_xgb.json`, ensuring a consistent and high-quality input for the final tuning stage.
 # 
-# - The curated feature set stored in `selected_features_xgb.json` will now be used as the input for the `5_hyperparameter_tuning.py` notebook to optimize the final XGBoost model.
+# -   **Model Interpretability:** SHAP analysis of the final model confirmed that it relies on physically meaningful properties, such as atomic volume, temperature, and electronic structure features. This increases our confidence that the model is not just fitting noise but has learned relevant structure-property relationships.
 # 
-# This notebook exemplifies a best-practice, interpretable, and modular ML workflow for materials property prediction, suitable for both research and industrial applications.
+# ### Next Steps:
+# 
+# The curated feature set stored in `selected_features_xgb.json` will now serve as the definitive input for the `5_hyperparameter_tuning.py` notebook. In the next and final modeling step, we will optimize the XGBoost model's hyperparameters to achieve the best possible performance with this validated feature set.
 

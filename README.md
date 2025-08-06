@@ -1,110 +1,117 @@
-# ML Conductivity Project
+# Predicting Thermal Conductivity with Machine Learning
 
-This project demonstrates a full machine learning pipeline for predicting thermal conductivity using scientific data. It is structured to highlight your skills in data processing, feature engineering, modeling, and reproducibility — ideal for portfolio review by technical recruiters or hiring managers.
+This project presents a complete, end-to-end machine learning pipeline to predict the thermal conductivity of inorganic materials using only their chemical formula. It is designed to showcase a professional, modular, and reproducible workflow suitable for a materials informatics or data science portfolio.
 
-## 📁 Project Structure
+The final XGBoost model achieves a **Test R² of 0.855** and a **Mean Absolute Error (MAE) of 0.35 W/mK** on a log-transformed scale, demonstrating high accuracy in predicting this complex material property.
+
+## Key Features & Technical Highlights
+
+- **End-to-End Workflow:** Covers the entire ML lifecycle, from raw data ingestion and cleaning to model deployment and interpretation.
+- **Physics-Informed Feature Engineering:** Generates over 145 features from chemical formulas using `matminer` and `jarvis-tools`, capturing elemental properties, stoichiometry, and structural information.
+- **Systematic Model Selection:** Rigorously compares multiple models (XGBoost, Random Forest, SVR) and preprocessing strategies to identify the optimal pipeline.
+- **Advanced Interpretability with SHAP:** Employs SHAP (SHapley Additive exPlanations) to provide transparent, physics-based explanations for model predictions, identifying the most influential material features.
+- **Modular & Reusable Code:** Core logic is organized into a reusable `src` directory, following professional software engineering best practices.
+- **Automated Integration Testing:** Includes a `pytest` suite to ensure the prediction script runs reliably.
+- **Reproducible Pipeline:** The entire workflow is captured in version-controlled notebooks, guaranteeing full reproducibility.
+
+## Installation and Setup
+
+### Prerequisites
+- Python 3.9+
+- Conda for environment management
+
+### Installation Steps
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/acfdavis/Thermal-Conductivity-ML.git
+    cd Thermal-Conductivity-ML
+    ```
+2.  **Create and activate the Conda environment:**
+    The repository includes a `requirements.txt` file for easy setup.
+    ```bash
+    conda create -n thermal_env python=3.9
+    conda activate thermal_env
+    pip install -r requirements.txt
+    ```
+3. **Set up API Key (Optional but Recommended):**
+    Feature generation relies on the `matminer` library, which can query the Materials Project database for additional data. To enable this, you need a Materials Project API key.
+    - Get a key from the [Materials Project Dashboard](https://materialsproject.org/dashboard).
+    - Create a file named `.env` in the root of the project directory.
+    - Add your API key to the file like this:
+      ```
+      MAPI_KEY=your_api_key_here
+      ```
+
+## Project Workflow
+
+The project is structured as a sequence of notebooks, each handling a distinct stage of the machine learning pipeline.
+
+1.  **`notebooks/1_eda.py`**: **Exploratory Data Analysis**
+    -   Performs initial analysis of the dataset, including summary statistics, distribution plots, and correlation analysis to understand the data's structure and identify potential challenges.
+
+2.  **`notebooks/2_clustering_and_pca.py`**: **Unsupervised Learning & Feature Engineering**
+    -   Applies PCA for dimensionality reduction and K-Means clustering to uncover natural groupings within the materials data. These clusters are later used as engineered features.
+
+3.  **`notebooks/3_modeling_and_feature_selection.py`**: **Model Comparison & Initial Feature Selection**
+    -   Systematically trains and evaluates multiple regression models (XGBoost, Random Forest, etc.) on different feature sets.
+    -   Performs an initial round of feature selection to identify the most promising model and feature combination.
+
+4.  **`notebooks/4_model_comparison.py`**: **Advanced Feature Selection & SHAP Analysis**
+    -   Takes the best-performing model (XGBoost) and applies more advanced feature selection techniques to create a minimal, high-performance feature set.
+    -   Uses SHAP to analyze feature importance and model behavior.
+
+5.  **`notebooks/5_hyperparameter_tuning.py`**: **Model Optimization & Finalization**
+    -   Performs hyperparameter tuning on the final model and feature set using `RandomizedSearchCV` to maximize predictive performance. The final, tuned model and pre-processing scaler are saved for inference.
+
+## How to Predict New Materials
+
+You can predict the thermal conductivity of new materials using the `scripts/predict_from_csv.py` script.
+
+1.  **Prepare an input CSV file.** Create a file (e.g., `my_materials.csv`) with a `formula` column containing the chemical formulas you want to predict.
+    ```csv
+    formula
+    SiO2
+    GaN
+    Bi2Te3
+    ```
+2.  **Run the prediction script from your terminal:**
+    ```bash
+    python scripts/predict_from_csv.py --input-path my_materials.csv --output-path predictions.csv
+    ```
+    - The script will load the final model from `models/tuned_xgboost_model.joblib`.
+    - It will generate features, apply the saved scaler, and make predictions.
+    - The output will be saved to `predictions.csv` and will include the predicted thermal conductivity and an estimated error.
+
+## How to Run Tests
+
+The project includes an integration test to verify that the prediction script works correctly from end to end.
+
+1.  **Make sure you have installed the dependencies** as described in the installation section.
+2.  **Run the tests using `pytest`:**
+    ```bash
+    pytest
+    ```
+    The tests will run and confirm that the script can successfully load the model and generate predictions.
+
+## Project Structure
 
 ```
-ml_conductivity_project/
+Thermal-Conductivity-ML/
 ├── data/
-│   ├── raw/                # Original ThermoML or CSV data
-│   └── processed/          # Cleaned and featurized data
-├── notebooks/              # Lightweight notebooks for demo and visualization
-├── src/                    # Modular and reusable pipeline code
-│   ├── data.py             # Data loading and preprocessing
-│   ├── features.py         # Feature engineering
-│   ├── modeling.py         # Model training and evaluation
-│   ├── viz.py              # Visualizations
+│   ├── raw/                # Original raw datasets
+│   └── processed/          # Cleaned, featurized, and intermediate data
+├── models/                 # Saved and tuned final models
+├── notebooks/              # Jupyter notebooks for each stage of the workflow
+├── plots/                  # Saved plots and visualizations
+├── scripts/                # Helper scripts (e.g., for prediction)
+├── src/                    # Reusable source code for the pipeline
+│   ├── data.py             # Data loading and cleaning functions
+│   ├── features.py         # Feature engineering functions
+│   ├── modeling.py         # Model training and evaluation functions
+│   ├── viz.py              # Visualization functions
 │   └── utils.py            # Shared utility functions
+├── tests/                  # Integration and unit tests
+├── .env                    # API keys (not version controlled)
 ├── requirements.txt        # Python dependencies
-├── README.md               # Project overview
-└── .gitignore              # Ignore large and generated files
+└── README.md               # Project overview
 ```
-
-## 🔍 Highlights
-
-- Chunked and memory-safe loading for large datasets
-- Feature engineering using domain-specific logic
-- Modular code for reproducibility
-- Lightweight demo notebooks (`.py` or `.ipynb`)
-- Ready to deploy or extend for materials informatics applications
-
-## 🚀 Getting Started
-
-```bash
-# Setup (Python >= 3.9 recommended)
-pip install -r requirements.txt
-```
-
-## ✅ Running the Demo
-
-Open `eda_and_clustering.py` in VS Code and run cells with `# %%` markers.
-Or, run the cleaned notebooks using Jupyter Lab (for best performance).
-
----
-
-© Your Name, 2025 — For demonstration and job application use only.
-## 🔮 Predicting a New Material
-
-To predict the thermal conductivity of a new material:
-
-1. Prepare a CSV with the same structure as the training data. You can use this example:
-
-```
-formula,temperature,pressure,phase
-SiO2,300,101325,solid
-```
-
-Save it as `data/example_input.csv`.
-
-2. Run the prediction script:
-
-```bash
-python scripts/predict_from_csv.py --model outputs/final_model.pkl --input data/example_input.csv --output data/predicted_kappa.csv
-```
-
-The predictions will be saved in `data/predicted_kappa.csv`.
-
-## 🛠️ Workflow Overview (2025 Refactor)
-
-This project is a recruiter-ready, modular ML workflow for predicting thermal conductivity, with a focus on:
-- **Modularity:** All data, feature, modeling, and visualization logic is in `src/` modules.
-- **Reproducibility:** All notebooks/scripts use robust utility functions for environment setup, data loading/caching, plot saving, DataFrame styling, and logging.
-- **Professional Outputs:** All plots and tables are recruiter/statistician-ready, with consistent, publication-quality style.
-- **Pipeline Stages:**
-  1. **EDA:** `notebooks/1_eda.py` — Exploratory data analysis, summary statistics, and target distribution.
-  2. **Clustering & PCA:** `notebooks/2_clustering_and_pca.py` — Unsupervised clustering, PCA, and cluster analysis.
-  3. **Feature Engineering:** `notebooks/3_feature_engineering.py` — Feature creation, selection, and curation (outputs `selected_features.json`).
-  4. **Advanced Modeling:** `notebooks/4_advanced_modeling.py` — Model comparison, SHAP analysis, and decision summary.
-  5. **Hyperparameter Tuning:** `notebooks/5_hyperparameter_tuning.py` — XGBoost tuning, final model/plot artifacts, and recruiter-friendly reporting.
-
-## 🧰 Utility Functions
-
-All notebooks/scripts use standardized utilities from `src/utils.py`:
-- `setup_environment()`: Loads environment variables and sets plotting defaults.
-- `load_cached_dataframe()`: Robustly loads cached data from Parquet, Pickle, or CSV.
-- `save_plot()`: Saves Plotly or Matplotlib figures with consistent style.
-- `style_df()`: Styles DataFrames for professional, readable tables.
-- `log_and_print()`: Unified logging/printing for notebook/console.
-- `prepare_data_for_modeling()`: Standard feature/target extraction and imputation.
-
-## 📊 Plot & Table Artifacts
-
-All key plots are saved as PDFs in organized subfolders under `plots/`, using `save_plot`. Tables in notebooks are styled with `style_df` for recruiter/statistician review.
-
-## 🔄 How to Run the Workflow
-
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. **Run each notebook in order:**
-   - `notebooks/1_eda.py`
-   - `notebooks/2_clustering_and_pca.py`
-   - `notebooks/3_feature_engineering.py`
-   - `notebooks/4_advanced_modeling.py`
-   - `notebooks/5_hyperparameter_tuning.py`
-
-   Or, open in Jupyter Lab/VS Code and run cell-by-cell.
-
-3. **All outputs (plots, models, features) are saved for downstream use.**

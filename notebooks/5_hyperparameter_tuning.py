@@ -3,41 +3,31 @@
 # coding: utf-8
 
 # %% [markdown]
-# # Hyperparameter Tuning for Thermal Conductivity Prediction
+# # 5. Final Model Optimization: Hyperparameter Tuning
 # 
 # **Author:** Angela Davis
 # **Date:** July 2, 2025
 # 
 # ## Workflow Overview
 # 
-# This notebook focuses on optimizing the best-performing model identified in the previous notebooks: the **XGBoost Regressor** with a curated set of scaled features.
+# This notebook represents the final, crucial step in our modeling pipeline: optimizing the performance of our chosen model architecture. We take the best-performing model (XGBoost) and the optimal feature set identified in the previous notebook and fine-tune its hyperparameters to maximize its predictive accuracy.
 # 
-# The steps are as follows:
-# 1.  **Data Loading:** Load the featurized dataset and the curated list of selected features from notebook 4.
-# 2.  **Data Preparation:** Prepare the data, applying the same scaling logic as the previous notebooks.
-# 3.  **Hyperparameter Grid Definition:** Define a search space for the key hyperparameters of the XGBoost model.
-# 4.  **Randomized Search:** Execute `RandomizedSearchCV` with cross-validation to find the best parameter combination.
-# 5.  **Model Retraining and Evaluation:** Train a new XGBoost model with the optimized hyperparameters and evaluate its performance on the test set.
-# 6.  **Performance Comparison:** Compare the tuned model's performance against the untuned baseline model (on the same selected, scaled features).
-# 7.  **Save the Final Model:** Serialize the tuned XGBoost model for future use in prediction scripts.
+# The workflow is as follows:
+# 1.  **Load Final Feature Set:** Load the featurized dataset and the curated list of selected features from notebook 4, ensuring a consistent data foundation.
+# 2.  **Prepare Data:** Apply the same training/testing split and scaling logic used previously to prepare the data for modeling.
+# 3.  **Define Hyperparameter Search Space:** Define a comprehensive search space for the key hyperparameters of the XGBoost model.
+# 4.  **Execute Randomized Search:** Employ `RandomizedSearchCV` with cross-validation to efficiently search for the optimal parameter combination within the defined space.
+# 5.  **Train and Evaluate Final Model:** Train a new XGBoost model using the best hyperparameters found during the search and evaluate its performance on the held-out test set.
+# 6.  **Benchmark Against Baseline:** Compare the tuned model's performance against the untuned, default-parameter model to quantify the value added by tuning.
+# 7.  **Save Production-Ready Model:** Serialize the final, tuned XGBoost model, making it ready for deployment in a production environment or for use in prediction scripts.
 
 # %%
 # --- Professionalized Imports and Setup ---
 import os, sys
-SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
-if SRC_PATH not in sys.path:
-    sys.path.insert(0, SRC_PATH)
-
-from utils import (
-    setup_environment, load_or_process_dataframe, save_plot, style_df, prepare_data_for_modeling, log_and_print
-)
-from modeling import split_data, scale_features, apply_power_transform, evaluate_model
-from viz import plot_parity_logscale
 import pandas as pd
 import numpy as np
 import json
 import joblib
-from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 import shap
 import matplotlib.pyplot as plt
@@ -45,60 +35,70 @@ from IPython.display import display
 from sklearn.model_selection import RandomizedSearchCV
 from scipy.stats import randint, uniform
 
+# --- Define Project Root for Robust Pathing ---
+try:
+    # Assumes the script is in the 'notebooks' directory
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+except NameError:
+    # Fallback for interactive environments (Jupyter, VSCode)
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.getcwd()))
+
+# Add the 'src' directory to the Python path
+SRC_PATH = os.path.join(PROJECT_ROOT, 'src')
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
+
+from utils import (
+    setup_environment, 
+    load_or_process_dataframe, 
+    save_plot, 
+    style_df, 
+    prepare_data_for_modeling, 
+    log_and_print
+)
+from modeling import split_data, scale_features, evaluate_model
+from viz import plot_parity_logscale
+
 # --- Setup environment and paths ---
 setup_environment()
-USE_CLUSTER_FEATURES = False
-CACHE_PATH = '../data/processed/featurized.parquet'
-SELECTED_FEATURES_PATH = '../data/processed/selected_features_xgb.json'
-FINAL_MODEL_PATH = '../models/tuned_xgboost_model.joblib'
-PLOTS_DIR = '../plots/5_hyperparameter_tuning'
+CACHE_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'featurized.parquet')
+SELECTED_FEATURES_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'selected_features_xgb.json')
+FINAL_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'tuned_xgboost_model.joblib')
+PLOTS_DIR = os.path.join(PROJECT_ROOT, 'plots', '5_hyperparameter_tuning')
 os.makedirs(PLOTS_DIR, exist_ok=True)
+
 PARITY_PLOT_PATH = os.path.join(PLOTS_DIR, 'tuned_xgb_model_parity_plot.pdf')
 SHAP_PLOT_PATH = os.path.join(PLOTS_DIR, 'tuned_xgb_model_shap_summary.pdf')
+COMPARISON_TABLE_PATH = os.path.join(PLOTS_DIR, 'final_model_comparison.csv')
 
 # --- Load featurized data using robust utility ---
 df = load_or_process_dataframe(cache_path=CACHE_PATH)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 
 # %% [markdown]
-# ## 1. Load and Prepare Data
+# ## 1. Load and Prepare Final Data
 # 
-# We load the same featurized data and the list of selected features to ensure consistency with the modeling notebook.
+# We begin by loading the complete featurized dataset and, most importantly, the final list of selected features that was curated and validated in the previous notebook. This ensures that we are tuning our model on the exact feature set that was proven to be most effective. All subsequent steps—splitting and scaling—are identical to the previous notebooks to maintain consistency.
 
 # %%
 # Prepare data for modeling
 X, y = prepare_data_for_modeling(df, target_col='thermal_conductivity')
 
 # %%
-# Conditionally add cluster features based on the flag
-if USE_CLUSTER_FEATURES:
-    log_and_print("Generating cluster features...")
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.cluster import KMeans
-
-    X_numeric = X.select_dtypes(include=np.number)
-    scaler_for_clustering = StandardScaler()
-    X_scaled_for_clustering = scaler_for_clustering.fit_transform(X_numeric)
-    
-    kmeans = KMeans(n_clusters=9, random_state=42, n_init=10)
-    cluster_labels = kmeans.fit_predict(X_scaled_for_clustering)
-    
-    X['cluster_label'] = cluster_labels
-    X_final = pd.get_dummies(X, columns=['cluster_label'], prefix='cluster')
-    log_and_print("Successfully added cluster labels.")
-else:
-    X_final = X
-    log_and_print("Skipping cluster feature generation as per configuration.")
-
-# %%
-# Load selected features and apply them
+# Load the final list of selected features from the previous notebook.
+# We no longer need the conditional logic for cluster features, as that
+# hypothesis was tested and rejected in notebook 4.
 with open(SELECTED_FEATURES_PATH, 'r') as f:
     selected_features = json.load(f)
 
-available_selected_features = [f for f in selected_features if f in X_final.columns]
-X_selected = X_final[available_selected_features]
+# Ensure all selected features are present in the dataframe
+available_features = [f for f in selected_features if f in X.columns]
+if len(available_features) != len(selected_features):
+    log_and_print("Warning: Some selected features were not found in the dataframe.")
 
-log_and_print(f"Loaded and applied {len(available_selected_features)} selected features.")
+X_selected = X[available_features]
+
+log_and_print(f"Loaded and applied {len(available_features)} selected features.")
 
 # %%
 # Split and scale the data
@@ -133,7 +133,7 @@ xgb_random_search = RandomizedSearchCV(
     estimator=xgb_reg,
     param_distributions=xgb_param_dist,
     n_iter=100,
-    cv=5,
+    cv=10,
     scoring='neg_mean_squared_error',
     verbose=1,
     n_jobs=-1,
@@ -207,6 +207,11 @@ log_and_print(f"Parity plot saved to {PARITY_PLOT_PATH}")
 log_and_print(f"SHAP summary plot saved to {SHAP_PLOT_PATH}")
 
 # %%
+# Save the scaler object for use in the prediction script
+SCALER_PATH = os.path.join(PROJECT_ROOT, 'models', 'scaler.joblib')
+joblib.dump(scaler, SCALER_PATH)
+log_and_print(f"Scaler saved to: {SCALER_PATH}")
+
 # Save the final tuned model
 joblib.dump(best_xgb_tuned, FINAL_MODEL_PATH)
 log_and_print(f"\nWinning model (Tuned XGBoost) saved to: {FINAL_MODEL_PATH}")
@@ -214,18 +219,15 @@ log_and_print(f"\nWinning model (Tuned XGBoost) saved to: {FINAL_MODEL_PATH}")
 # %% [markdown]
 # ## 6. Conclusion and Next Steps
 # 
-# The hyperparameter tuning process successfully improved the XGBoost model's performance, leading to a higher R² score and lower error metrics compared to the baseline model on the curated feature set. The final model, saved as `tuned_xgboost_model.joblib`, is now ready for use in our prediction pipeline.
+# The hyperparameter tuning process successfully improved the XGBoost model's performance, leading to a higher R² score and lower error metrics compared to the baseline model on the curated feature set. The final model, saved as `tuned_xgboost_model.joblib`, represents the culmination of our workflow and is now ready for use in our prediction pipeline.
 # 
-# The SHAP analysis confirms that both physical properties and compositional features are significant drivers of the model's predictions. The inclusion of cluster features also proved beneficial, capturing underlying patterns in the data that individual features alone could not.
+# The SHAP analysis confirms that the model's predictions are driven by physically meaningful properties, such as atomic volume, temperature, and electronic structure, which increases our confidence in its real-world applicability.
 # 
-# **Potential Next Steps:**
-# 1.  **Deployment:** Integrate the saved model into a web service or API for real-time predictions using the `scripts/predict_from_csv.py` script as a template.
-# 2.  **Deeper Error Analysis:** Investigate the largest prediction errors to identify specific material classes or regions of the feature space where the model struggles.
-# 3.  **Experiment with More Features:** Explore additional feature engineering techniques or external datasets to further enhance predictive accuracy.
-# 4.  **Alternative Models:** While XGBoost performed well, exploring other advanced models like deep neural networks could yield further improvements, especially if more data becomes available.
-
-# %%
-# Save the comparison table as a CSV file
-comparison_table_path = os.path.join(PLOTS_DIR, 'model_comparison.csv')
-comparison_log_df.to_csv(comparison_table_path, index=True)
-log_and_print(f"Comparison table saved as {comparison_table_path}")
+# This project demonstrates a complete, end-to-end machine learning workflow, from initial data exploration and cleaning to rigorous, data-driven model selection and final optimization. Key decisions, such as rejecting power-transformed features and cluster labels, were made based on evidence, resulting in a final model that is both accurate and appropriately complex.
+# 
+# ### Potential Next Steps:
+# 
+# 1.  **Deployment:** Integrate the saved `tuned_xgboost_model.joblib` into a web service or API for real-time predictions, using the `scripts/predict_from_csv.py` script as a template.
+# 2.  **Deeper Error Analysis:** Investigate the largest prediction errors to identify specific material classes or regions of the feature space where the model struggles, which could guide future feature engineering efforts.
+# 3.  **Continuous Improvement:** As more data becomes available, retrain and re-tune the model to further enhance its predictive accuracy and expand its applicability.
+# 4.  **Alternative Architectures:** While XGBoost performed well, exploring other advanced models like Graph Neural Networks (GNNs), which are well-suited for materials science, could yield further improvements.

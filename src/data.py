@@ -66,12 +66,12 @@ def _filter_thermal_conductivity_data(df_data):
     return standardized_df
 
 
-def load_and_standardize_nist() -> pd.DataFrame:
+def load_and_standardize_nist(project_root) -> pd.DataFrame:
     """Load NIST ThermoML data, filter for thermal conductivity of crystalline solids."""
-    data_file = r"c:\Users\angel\thermal_conductivity\ml_conductivity_project_user_ready\data\raw\thermoml_data.pkl"
+    data_file = os.path.join(project_root, 'data', 'raw', 'thermoml_data.parquet')
 
 
-    df_data = joblib.load(data_file)
+    df_data = pd.read_parquet(data_file)
 
     if isinstance(df_data, pd.DataFrame) and 'property' in df_data.columns:
         df_data = df_data.dropna(subset=['property'])
@@ -101,7 +101,7 @@ def parse_temperature(val):
         return 298.15
     return np.nan
 
-def load_and_merge_data(drop_missing=True):
+def load_and_merge_data(project_root, drop_missing=True):
     """
     Load and combine datasets from Citrine, UCSB, and NIST.
     Optionally drop rows missing formula, temperature, or thermal_conductivity.
@@ -112,7 +112,7 @@ def load_and_merge_data(drop_missing=True):
     print(f"Citrine data loaded: {citrine_df.shape}")
     ucsb_df = load_and_standardize_ucsb()
     print(f"UCSB data loaded: {ucsb_df.shape}")
-    nist_df = load_and_standardize_nist()
+    nist_df = load_and_standardize_nist(project_root)
     print(f"NIST data loaded: {nist_df.shape}")
 
     datasets_to_combine = []

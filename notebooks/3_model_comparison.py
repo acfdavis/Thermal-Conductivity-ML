@@ -55,7 +55,15 @@
 # %%
 # --- Professionalized Imports and Setup ---
 import os, sys
-SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+try:
+    # Assumes the script is in the 'notebooks' directory
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+except NameError:
+    # Fallback for interactive environments (Jupyter, VSCode)
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.getcwd()))
+
+# Add the 'src' directory to the Python path
+SRC_PATH = os.path.join(PROJECT_ROOT, 'src')
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
 
@@ -95,7 +103,8 @@ from sklearn.preprocessing import PowerTransformer
 # --- Setup environment and paths ---
 setup_environment()
 USE_CLUSTER_FEATURES = False
-PLOTS_DIR = '../plots/3_model_comparison'
+PLOTS_DIR = os.path.join(PROJECT_ROOT, 'plots', '3_model_comparison')
+os.makedirs(PLOTS_DIR, exist_ok=True)
 PARITY_GRID_PATH = os.path.join(PLOTS_DIR, 'adv_model_parity_grid.pdf')
 MODEL_COMP_PATH = os.path.join(PLOTS_DIR, 'adv_model_comparison.pdf')
 XGB_SHAP_PATH = os.path.join(PLOTS_DIR, 'adv_model_xgb_shap.pdf')
@@ -104,7 +113,7 @@ XGB_SHAP_PATH = os.path.join(PLOTS_DIR, 'adv_model_xgb_shap.pdf')
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
 # --- Load featurized data using robust utility ---
-CACHE_PATH = '../data/processed/featurized.parquet'
+CACHE_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'featurized.parquet')
 df = load_or_process_dataframe(cache_path=CACHE_PATH)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 style_df(df.head())
@@ -250,100 +259,22 @@ results_df.to_csv(os.path.join(PLOTS_DIR, 'model_comparison.csv'), index=True)
 log_and_print("Comparison table saved as model_comparison.csv")
 
 # %% [markdown]
-# # ### Model Selection: XGBoost on Scaled Features
-# 
-# Based on a comprehensive comparison of performance metrics, the **XGBoost model trained on standard scaled features (without power transformation)** is selected as the optimal model.
-# 
-# #### Rationale for Selection:
-# 
-# *   **Superior Predictive Accuracy:** The `XGBoost` model achieved the lowest Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) among all candidates. This indicates that its predictions are, on average, the most accurate and have the smallest deviations from the true values.
-# *   **High Coefficient of Determination (R²):** It also demonstrated an excellent R² score, explaining a high degree of variance in the target variable. While the `Random Forest_transformed` model had a marginally higher R², the difference was negligible, and XGBoost's superior error metrics make it the more compelling choice.
-# *   **Optimal Simplicity:** Crucially, the top-performing model did not require the `PowerTransformer` preprocessing step. Opting for the simpler `StandardScaler`-only pipeline reduces model complexity, improves training speed, and enhances interpretability, as feature importance can be directly related to the original feature scales.
-# *   **Inherent Regularization:** XGBoost includes built-in L1 (Lasso) and L2 (Ridge) regularization terms, which inherently combat overfitting and improve the model's ability to generalize to new, unseen data.
-# 
-# Given this balance of high accuracy, simplicity, and robustness, the **XGBoost** model will be carried forward for more detailed feature selection and hyperparameter tuning in the subsequent notebooks.
-
-# %% [markdown]
-# ## In-Depth Model Analysis with SHAP
-# 
-# While standard feature importance is useful, SHAP (SHapley Additive exPlanations) provides deeper insights into how each feature impacts the model's predictions. We will generate SHAP summary plots for our top-performing tree-based models.
-
-# %%
-# Visualizations using updated, modular functions
-# Combine all models and results for comprehensive plotting
-best_model_name = 'XGBoost'
-
-for model_name, model_obj in all_models.items():
-    log_and_print(f"\n--- Visuals for {model_name} ---")
-    
-    # Determine the correct test and train sets for the model
-    if 'transformed' in model_name:
-        X_test_current = X_test_transformed
-        X_train_current = X_train_transformed
-    else:
-        X_test_current = X_test_scaled
-        X_train_current = X_train_scaled
-
-    fig_parity = plot_parity_logscale(model_obj, X_test_current, y_test_log, model_name)
-    save_plot(fig_parity, os.path.join(PLOTS_DIR, f"{model_name}_parity_logscale.pdf"))
-    
-    fig_resid = plot_residuals(model_obj, X_test_current, y_test_log, model_name)
-    save_plot(fig_resid, os.path.join(PLOTS_DIR, f"{model_name}_residuals.pdf"))
-    
-    if hasattr(model_obj, 'feature_importances_'):
-        import shap
-        explainer = shap.TreeExplainer(model_obj)
-        shap_values = explainer.shap_values(X_test_current)
-        log_and_print(f"SHAP Summary for {model_name}:")
-        shap.summary_plot(shap_values, X_test_current, show=False, feature_names=X_final.columns)
-        save_plot(plt.gcf(), os.path.join(PLOTS_DIR, f"{model_name}_shap_summary.pdf"))
-        plt.show()
-    else:
-        fig_imp = plot_feature_importance(model_obj, X_train_current, X_final.columns, model_name, y_train=y_train_log)
-        save_plot(fig_imp, os.path.join(PLOTS_DIR, f"{model_name}_feature_importance.pdf"))
-
-
-# Generate and save the model comparison plot, highlighting the best model
-fig_comparison = plot_model_comparison(all_results, best_model_name=best_model_name)
-save_plot(fig_comparison, os.path.join(PLOTS_DIR, "model_comparison_bar_chart.pdf"))
-fig_comparison.show()
-
-# --- Generate Parity Grids for Both Scaled and Transformed Models ---
-
-# Plot grid for non-transformed models
-models_scaled = {k: v for k, v in all_models.items() if 'transformed' not in k}
-fig_grid_scaled = plot_parity_grid(
-    models_scaled, 
-    X_test_scaled, 
-    y_test_log, 
-    best_model_name=best_model_name,
-    title="Model Parity Plots (Scaled Features)"
-)
-fig_grid_scaled.show()
-save_plot(fig_grid_scaled, os.path.join(PLOTS_DIR, "parity_plot_grid_scaled.pdf"))
-
-# Plot grid for transformed models
-models_transformed = {k: v for k, v in all_models.items() if 'transformed' in k}
-fig_grid_transformed = plot_parity_grid(
-    models_transformed, 
-    X_test_transformed, 
-    y_test_log, 
-    best_model_name=best_model_name,
-    title="Model Parity Plots (Transformed Features)"
-)
-fig_grid_transformed.show()
-save_plot(fig_grid_transformed, os.path.join(PLOTS_DIR, "parity_plot_grid_transformed.pdf"))
-
-
-# Save the SHAP summary plot for the best model again for emphasis
-log_and_print(f"\nSaving final SHAP summary for {best_model_name} model...")
-best_model_obj = all_models[best_model_name]
-explainer = shap.TreeExplainer(best_model_obj)
-# Use the correct test set for the best model (non-transformed)
-shap_values = explainer.shap_values(X_test_scaled)
-shap.summary_plot(shap_values, X_test_scaled, show=False, feature_names=X_final.columns)
-save_plot(plt.gcf(), os.path.join(PLOTS_DIR, f"{best_model_name}_final_shap_summary.pdf"))
-plt.close()
-log_and_print(f"All plots saved to {PLOTS_DIR} directory.")
-
-# %%
+# #### Model Selection: XGBoost on Scaled Features
+#
+# #### The Decision
+# Based on a comprehensive comparison of performance metrics, the **XGBoost model trained on standard scaled features (without power transformation)** is selected as the optimal model for this project.
+#
+# #### Rationale for Selection
+#
+# 1.  **Superior Predictive Accuracy:** The `XGBoost` model achieved the lowest Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) among all candidates, indicating its predictions are, on average, the most accurate.
+#
+# 2.  **Robustness of Tree-Based Models:** A key insight from this experiment is that the tree-based models (XGBoost, Random Forest, Gradient Boosting) showed **no significant performance gain** from the `PowerTransformer`. Their non-linear, tree-based structure makes them inherently robust to the underlying distribution of features.
+#
+# 3.  **Benefit for SVR:** In contrast, the `SVR` model's performance **did improve** with the transformed features. This is expected, as distance-based algorithms like SVR are sensitive to feature scale and distribution. However, even the improved SVR was not competitive with the top tree-based models.
+#
+# 4.  **The Value of Simplicity:** Since the best-performing model (`XGBoost`) does not benefit from the extra `PowerTransformer` step, we choose the simpler preprocessing pipeline. This reduces model complexity, improves training and inference speed, and enhances interpretability.
+#
+# #### Conclusion
+# This rigorous comparison validates our choice of the non-transformed **XGBoost** model. It provides the best balance of high accuracy, simplicity, and robustness. This model will be carried forward for more detailed feature selection and hyperparameter tuning in the subsequent notebooks.
+#
+# **Next Notebook: [4_modeling_and_feature_selection.py](4_modeling_and_feature_selection.py)**

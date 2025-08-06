@@ -15,13 +15,110 @@ import pandas as pd
 import joblib
 from mp_api.client import MPRester
 from sklearn.decomposition import PCA
+from matminer.featurizers.base import MultipleFeaturizer
+from matminer.featurizers.composition import ElementProperty, Stoichiometry, ValenceOrbital
+from matminer.featurizers.structure import DensityFeatures
+from pymatgen.core import Composition
+
+# Use an absolute import from `src` as it's added to sys.path
 from data import load_and_merge_data, impute_and_clean_data
 
 
-# Load environment variables from .env file
-load_dotenv()
-from pymatgen.core import Composition
-from matminer.featurizers.composition import ElementProperty, Stoichiometry, ValenceOrbital
+def featurize_data(df, composition_col='formula', cache_path=None):
+    """
+    Applies a series of matminer featurizers to the input dataframe.
+
+    The function performs the following steps:
+    1. Adds composition-based features using Magpie, Stoichiometry, and Valence Orbital analyses.
+    2. Normalizes column names for consistency.
+    3. Enriches the dataframe with materials properties from the Materials Project (if API key is available).
+    4. Enriches the dataframe with features from the JARVIS-DFT database.
+    5. Classifies the material type based on the composition.
+    6. Classifies the crystal structure based on the space group number.
+
+    If `cache_path` is provided and exists, load the cached result.
+    Otherwise, run the pipeline and save to cache (if path provided).
+
+    Args:
+        df (pd.DataFrame): Input dataframe containing material formulas.
+        cache_path (str, optional): Path to cache the features as a parquet file.
+
+    Returns:
+        pd.DataFrame: DataFrame enriched with features.
+    """
+    import pandas as pd
+    if cache_path and os.path.exists(cache_path):
+        print(f"Loading cached features from {cache_path}...")
+        return pd.read_parquet(cache_path)
+
+    print("Starting feature engineering...")
+
+    if composition_col not in df.columns:
+        raise ValueError(f"Composition column '{composition_col}' not found in DataFrame.")
+
+    df_comp = add_composition_features(df, composition_column=composition_col)
+    print("Composition features added.")
+
+    # Normalize column names immediately after they are created
+    df_comp = normalize_column_names(df_comp)
+    print("Column names normalized.")
+
+    api_key = os.getenv("MP_API_KEY")
+    if api_key:
+        df_comp = add_materials_project_features(df_comp, api_key)
+        print("Materials Project features added.")
+    else:
+        print("Materials Project API key not found. Skipping these features.")
+
+    df_jarvis = add_jarvis_features(df_comp)
+    print("JARVIS features added.")
+
+    # Add chemistry column using classify_material on formula
+    df_jarvis['chemistry'] = df_jarvis[composition_col].apply(classify_material)
+
+    # Add crystal_structure column using a more robust approach
+    df_jarvis['crystal_structure'] = df_jarvis['MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
+
+    # Initialize the column with 'Unknown'
+    #df_jarvis['crystal_structure'] = 'Unknown'
+
+    # First, try to use the crystal_system from Materials Project if it exists
+    #if 'crystal_system' in df_jarvis.columns:
+    #    # Use .loc to avoid SettingWithCopyWarning
+    #    df_jarvis.loc[df_jarvis['crystal_system'].notna(), 'crystal_structure'] = df_jarvis['crystal_system']
+
+    # For any remaining 'Unknown' values, try to use the Magpie spacegroup number
+    #if 'MagpieData_mean_SpaceGroupNumber' in df_jarvis.columns:
+    #    # Identify rows that are still 'Unknown' and have a valid spacegroup number
+    #    unknown_mask = (df_jarvis['crystal_structure'] == 'Unknown') & (df_jarvis['MagpieData_mean_SpaceGroupNumber'].notna())
+    #    # Apply the classification function only to those rows
+    #    df_jarvis.loc[unknown_mask, 'crystal_structure'] = df_jarvis.loc[unknown_mask, 'MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
+
+
+    print("Feature engineering complete.")
+    
+    # Convert any special types (like Enums) to strings before caching
+    if 'crystal_system' in df_jarvis.columns:
+        df_jarvis['crystal_system'] = df_jarvis['crystal_system'].astype(str)
+
+    if cache_path:
+        try:
+            df_jarvis.to_parquet(cache_path, index=False)
+            print(f"Features cached to {cache_path}.")
+        except Exception as e:
+            print(f"Error caching to Parquet: {e}")
+            # Fallback or further error handling can be added here
+            # For example, converting all object columns to string
+            print("Attempting to convert all object columns to string and re-caching...")
+            for col in df_jarvis.select_dtypes(include=['object']).columns:
+                df_jarvis[col] = df_jarvis[col].astype(str)
+            df_jarvis.to_parquet(cache_path, index=False)
+            print(f"Features successfully cached to {cache_path} after type conversion.")
+
+
+    return df_jarvis
+
+
 
 def add_composition_features(df, composition_column='formula'):
     """
@@ -155,87 +252,6 @@ def add_jarvis_features(df):
         df = pd.merge(df, results_df, on='formula', how='left')
     print(f"Successfully fetched data for {len(results_df)} of {len(formulas)} unique formulas from JARVIS.")
     return df
-
-
-
-def featurize_data(df, composition_col='formula', cache_path=None):
-    """
-    Orchestrates the feature engineering pipeline.
-    
-    If `cache_path` is provided and exists, load the cached result.
-    Otherwise, run the pipeline and save to cache (if path provided).
-    """
-    import pandas as pd
-    if cache_path and os.path.exists(cache_path):
-        print(f"Loading cached features from {cache_path}...")
-        return pd.read_parquet(cache_path)
-
-    print("Starting feature engineering...")
-
-    if composition_col not in df.columns:
-        raise ValueError(f"Composition column '{composition_col}' not found in DataFrame.")
-
-    df_comp = add_composition_features(df, composition_column=composition_col)
-    print("Composition features added.")
-
-    # Normalize column names immediately after they are created
-    df_comp = normalize_column_names(df_comp)
-    print("Column names normalized.")
-
-    api_key = os.getenv("MP_API_KEY")
-    if api_key:
-        df_comp = add_materials_project_features(df_comp, api_key)
-        print("Materials Project features added.")
-    else:
-        print("Materials Project API key not found. Skipping these features.")
-
-    df_jarvis = add_jarvis_features(df_comp)
-    print("JARVIS features added.")
-
-    # Add chemistry column using classify_material on formula
-    df_jarvis['chemistry'] = df_jarvis[composition_col].apply(classify_material)
-
-    # Add crystal_structure column using a more robust approach
-    df_jarvis['crystal_structure'] = df_jarvis['MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
-
-    # Initialize the column with 'Unknown'
-    #df_jarvis['crystal_structure'] = 'Unknown'
-
-    # First, try to use the crystal_system from Materials Project if it exists
-    #if 'crystal_system' in df_jarvis.columns:
-    #    # Use .loc to avoid SettingWithCopyWarning
-    #    df_jarvis.loc[df_jarvis['crystal_system'].notna(), 'crystal_structure'] = df_jarvis['crystal_system']
-
-    # For any remaining 'Unknown' values, try to use the Magpie spacegroup number
-    #if 'MagpieData_mean_SpaceGroupNumber' in df_jarvis.columns:
-    #    # Identify rows that are still 'Unknown' and have a valid spacegroup number
-    #    unknown_mask = (df_jarvis['crystal_structure'] == 'Unknown') & (df_jarvis['MagpieData_mean_SpaceGroupNumber'].notna())
-    #    # Apply the classification function only to those rows
-    #    df_jarvis.loc[unknown_mask, 'crystal_structure'] = df_jarvis.loc[unknown_mask, 'MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
-
-
-    print("Feature engineering complete.")
-    
-    # Convert any special types (like Enums) to strings before caching
-    if 'crystal_system' in df_jarvis.columns:
-        df_jarvis['crystal_system'] = df_jarvis['crystal_system'].astype(str)
-
-    if cache_path:
-        try:
-            df_jarvis.to_parquet(cache_path, index=False)
-            print(f"Features cached to {cache_path}.")
-        except Exception as e:
-            print(f"Error caching to Parquet: {e}")
-            # Fallback or further error handling can be added here
-            # For example, converting all object columns to string
-            print("Attempting to convert all object columns to string and re-caching...")
-            for col in df_jarvis.select_dtypes(include=['object']).columns:
-                df_jarvis[col] = df_jarvis[col].astype(str)
-            df_jarvis.to_parquet(cache_path, index=False)
-            print(f"Features successfully cached to {cache_path} after type conversion.")
-
-
-    return df_jarvis
 
 
 

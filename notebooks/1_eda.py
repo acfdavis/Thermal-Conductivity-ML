@@ -2,26 +2,27 @@
 # coding: utf-8
 
 # %% [markdown]
-# # Exploratory Data Analysis (EDA): Uncovering Material Clusters for Thermal Conductivity Prediction
+# # Exploratory Data Analysis for Thermal Conductivity Prediction
 #
-# ## Executive Summary
+# ## 1. Project Objective
 #
-# **Business Problem:** Predicting the thermal conductivity of new materials is a slow and expensive process, hindering the development of next-generation electronics and energy systems.
+# This notebook marks the first step in an end-to-end machine learning project to predict the thermal conductivity of inorganic materials. The primary goal of this initial phase—Exploratory Data Analysis (EDA)—is to thoroughly understand the dataset's structure, identify potential data quality issues, and uncover key relationships that will inform our subsequent modeling strategies.
 #
-# **Our Solution:** This notebook demonstrates a data-driven approach to accelerate material discovery. By analyzing a dataset of 1,200 inorganic compounds, we use Exploratory Data Analysis (EDA) to understand the data's underlying structure and prepare it for advanced modeling.
+# ## 2. Business Context
 #
-# **Key Achievements & Skills Demonstrated:**
-# - **Project Structure & Reproducibility:** Organized code into a modular `src` directory with utility functions for data processing, visualization, and environment setup, ensuring a clean and repeatable workflow.
-# - **Data Featurization & Caching:** Transformed raw chemical formulas into over 100 quantitative features and implemented an efficient caching mechanism (`.parquet`) to accelerate subsequent data loading.
-# - **Insightful Visualization:** Created clear, professional, and consistently styled visualizations to analyze feature distributions, correlations, and the target variable. This includes generating multi-page PDF reports for comprehensive analysis while keeping the notebook summary concise.
-# - **Statistical Analysis:** Performed statistical tests to validate observations, such as using the Shapiro-Wilk test to confirm the necessity of a log transformation for the target variable.
+# In materials science, discovering new materials with optimal thermal properties is critical for developing next-generation electronics, batteries, and energy systems. However, the traditional process of synthesizing and testing materials is extremely slow and expensive. This project demonstrates how a data-driven approach can accelerate this discovery process, providing significant business value by reducing R&D costs and shortening time-to-market.
 #
-# **Business Value:** This initial analysis is a critical first step in any data science project. It builds a solid foundation for a machine learning model that can predict thermal conductivity with high accuracy, drastically reducing R&D costs and speeding up time-to-market for new technologies. It showcases a robust and professional workflow for turning complex scientific data into actionable business intelligence.
+# ## 3. Technical Skills & Achievements Demonstrated
+#
+# - **Structured Project Setup:** The project is organized with a modular `src` directory, demonstrating best practices for creating reproducible and maintainable code.
+# - **Efficient Data Processing:** Raw chemical formulas are converted into a rich set of over 100 physics-informed features. An efficient caching system (`.parquet`) is implemented to dramatically speed up subsequent data loading and processing.
+# - **Insightful Visualization:** Professional, publication-quality visualizations are used to analyze feature distributions and correlations. The code demonstrates how to generate comprehensive, multi-page PDF reports while keeping the notebook summary clean and concise.
+# - **Statistical Rigor:** Visual observations are validated with formal statistical tests (e.g., Shapiro-Wilk test for normality), confirming the need for specific preprocessing steps like log transformations.
 
 # %% [markdown]
 # ## 1. Environment Setup and Data Preparation
 #
-# Here, we import the necessary libraries and our custom utility functions from the `src` directory. This modular approach demonstrates best practices for structuring a Python project. We then load, clean, and featurize the raw data, transforming chemical formulas into a rich feature set suitable for machine learning. Caching is used to accelerate subsequent runs.
+# This section sets up the analysis environment. We import standard libraries and our custom modules from the `src` directory, which contains reusable functions for data processing, visualization, and environment configuration. We then load the raw data, generate a rich feature set from the chemical formulas, and cache the result as a `.parquet` file to accelerate future runs. This modular approach is a key practice for building reproducible and maintainable data science workflows.
 
 # %%
 import os
@@ -33,7 +34,15 @@ from matplotlib.backends.backend_pdf import PdfPages
 %matplotlib inline
 
 # Ensure src directory is added to sys.path for modular imports
-SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+try:
+    # Assumes the script is in the 'notebooks' directory
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+except NameError:
+    # Fallback for interactive environments (Jupyter, VSCode)
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.getcwd()))
+
+# Add the 'src' directory to the Python path
+SRC_PATH = os.path.join(PROJECT_ROOT, 'src')
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
 
@@ -53,10 +62,10 @@ from viz import (
 
 # --- Setup Environment & Define Paths ---
 setup_environment()
-PLOTS_DIR = '../plots/1_eda'
+PLOTS_DIR = os.path.join(PROJECT_ROOT, 'plots', '1_eda')
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
-CACHE_PATH = '../data/processed/featurized.parquet'
+CACHE_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'featurized.parquet')
 HIST_PATH = os.path.join(PLOTS_DIR, 'eda_numeric_histograms.pdf')
 HIST_LOG_PATH = os.path.join(PLOTS_DIR, 'eda_numeric_histograms_log.pdf')
 HIST_TC_PATH = os.path.join(PLOTS_DIR, 'eda_tc_histograms.pdf')
@@ -129,7 +138,7 @@ plt.show()
 # %% [markdown]
 # ### Statistical Summary and Normality Assessment
 #
-# Let's quantify the observations from the plots by computing summary statistics and performing a formal normality test (Shapiro-Wilk) on the target variable before and after the log transformation. This adds statistical rigor to our visual analysis.
+# To add statistical rigor to our visual analysis, we will now quantify our observations. This involves computing summary statistics and performing a formal normality test (Shapiro-Wilk) on the target variable, both before and after the log transformation.
 
 # %%
 # Summary statistics for thermal conductivity (original and log scale)
@@ -175,7 +184,7 @@ style_df(normality_results.sort_values(by="P-Value", ascending=False))
 # %% [markdown]
 # ### Correlation Analysis
 #
-# Finally, let's examine the correlation structure among the top features and the target variable. This helps identify potentially predictive features, as well as multicollinearity (high correlation between predictors), which can inform feature selection for modeling.
+# Finally, we examine the correlation structure of the dataset. A correlation matrix helps us identify which features are most strongly related to the target variable (`thermal_conductivity`). It also reveals potential multicollinearity (high correlation between predictor variables), an important consideration for feature selection in the modeling phase.
 
 # %%
 # Compute correlation matrix for top 10 features most correlated with the target
@@ -209,12 +218,10 @@ plt.show()
 # *   We also observe high correlations between some independent features (e.g., `density` and `atomic_mass`). This indicates potential multicollinearity, which can affect the interpretability and stability of some linear models. This analysis is crucial for guiding feature selection and engineering in the subsequent modeling stages.
 
 # %% [markdown]
-# ## 3. Next Steps: Clustering and Unsupervised Learning
-# 
-# This notebook focused on the initial exploratory data analysis. The insights gained here—particularly the need for log transformations and the awareness of feature correlations—are foundational for the next steps.
-# 
-# For dimensionality reduction (PCA), clustering, and cluster composition analysis, please see the dedicated notebook:
-# 
-# **[2_clustering_and_pca.py](2_clustering_and_pca.py)**
-# 
-# That notebook continues the workflow by uncovering hidden structure in the data and generating cluster-based features for downstream modeling.
+# ## 3. Conclusion and Next Steps
+#
+# This exploratory analysis has provided critical insights into the dataset's structure. We've confirmed the necessity of log-transforming our skewed target variable and identified key feature correlations that will inform our modeling strategy. The data is now understood and prepared for the next stage of the pipeline.
+#
+# The workflow continues in the next notebook, where we will use unsupervised learning techniques to uncover hidden structures in the data:
+#
+# **Next Notebook: [2_clustering_and_pca.py](2_clustering_and_pca.py)**

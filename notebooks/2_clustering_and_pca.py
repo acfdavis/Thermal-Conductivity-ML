@@ -1,31 +1,21 @@
 # %% [markdown]
-# # Dimensionality Reduction and Clustering
+# # Unsupervised Learning: Clustering and PCA for Materials Insight
 #
-# ## Objective
+# ## 1. Objective
 #
-# This notebook builds upon the initial Exploratory Data Analysis (EDA) by applying dimensionality reduction and unsupervised clustering techniques. The goal is to uncover hidden structures and natural groupings within the materials dataset, which can provide valuable insights for feature engineering and targeted modeling.
+# This notebook explores the underlying structure of the materials data using unsupervised learning. By applying Principal Component Analysis (PCA) for dimensionality reduction and K-Means clustering, we aim to answer a key question: **Can we identify distinct, chemically meaningful groups of materials, and can these groups be used as engineered features to improve our predictive models?**
 #
-# ## Workflow Overview
+# This process is critical for two reasons:
+# 1.  It provides valuable domain insights into the natural families of materials within our dataset.
+# 2.  It allows us to rigorously test a common feature engineering hypothesis in a data-driven way.
 #
-# This notebook follows a structured approach to uncover hidden structures in materials data using dimensionality reduction and clustering techniques.
+# ## 2. Key Steps & Findings
 #
-# ## Key Steps
-#
-# 1. **Data Preparation:** Log transformation and standardization to handle skewed features and prepare data for clustering.
-# 2. **Dimensionality Reduction:** PCA to reduce feature space while retaining 95% of variance.
-# 3. **Clustering:** K-Means clustering to identify natural groupings in the data.
-# 4. **Cluster Analysis:** Visualization and analysis of cluster composition and properties.
-#
-# ## Insights
-# - **Log Transformation:** Improved clustering performance by reducing skewness in features.
-# - **PCA:** Enabled efficient clustering by reducing feature space.
-# - **K-Means Clustering:** Revealed distinct groups with meaningful chemical and structural properties.
-#
-# ## Next Steps
-#
-# - Incorporate cluster labels into predictive modeling workflows.
-# - Explore other clustering algorithms for comparison.
-# - Perform feature importance analysis to understand key drivers of clustering.
+# - **Data Preparation:** We apply a log transformation and standardization to prepare the skewed feature data for distance-based algorithms like PCA and K-Means.
+# - **Dimensionality Reduction:** PCA is used to reduce the feature space from over 100 features to a much smaller set of components while retaining 95% of the data's variance.
+# - **Clustering & Analysis:** K-Means clustering is performed on the PCA-reduced data. We find that the resulting clusters correspond well to known chemical families (e.g., oxides, alloys).
+# - **The Modeling Outcome:** As will be demonstrated quantitatively in Notebook #4, while these clusters are insightful, they **do not ultimately improve the predictive performance** of the final XGBoost model. This notebook documents the valuable analytical process that justifies the decision to exclude them.
+
 # %%
 
 # --- Imports and Setup ---
@@ -41,10 +31,17 @@ from sklearn.impute import SimpleImputer
 import plotly.graph_objects as go
 
 # Ensure src directory is added to sys.path for modular imports
-SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+try:
+    # Assumes the script is in the 'notebooks' directory
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+except NameError:
+    # Fallback for interactive environments (Jupyter, VSCode)
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.getcwd()))
+
+# Add the 'src' directory to the Python path
+SRC_PATH = os.path.join(PROJECT_ROOT, 'src')
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
-
 # Re-import modules after fixing sys.path
 from viz import (
     plot_clusters, 
@@ -64,10 +61,10 @@ from utils import (
 
 # --- Setup environment and paths ---
 setup_environment()
-PLOTS_DIR = '../plots/2_clustering_and_pca'
+PLOTS_DIR = os.path.join(PROJECT_ROOT, 'plots', '2_clustering_and_pca')
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
-CACHE_PATH = '../data/processed/featurized.parquet'
+CACHE_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'featurized.parquet')
 PCA_VAR_PATH = os.path.join(PLOTS_DIR, 'clustering_pca_variance.pdf')
 SILHOUETTE_PATH = os.path.join(PLOTS_DIR, 'clustering_silhouette_scores.pdf')
 CLUSTER_SCATTER_PATH = os.path.join(PLOTS_DIR, 'clustering_cluster_scatter.pdf')
@@ -145,7 +142,7 @@ k_range = list(range(2, 30))
 
 # Calculate inertia values for the range of k (elbow method)
 inertia_values = get_inertia_values(X_pca, k_range)
-optimal_k_elbow = find_elbow_point(inertia_values, k_range)
+optimal_k_elbow = int(find_elbow_point(inertia_values, k_range))
 log_and_print(f"Optimal k determined using the elbow method: {optimal_k_elbow}")
 
 fig_elbow_inertia = plot_elbow_inertia_with_marker(inertia_values, k_range, optimal_k_elbow)
@@ -169,18 +166,26 @@ fig_silhouette.show()
 # %% [markdown]
 # ### Fitting the K-Means Model
 #
-# Based on the silhouette analysis, we select the optimal `k` and fit the K-Means algorithm to the PCA-transformed data.
+# Based on the silhouette analysis and elbow method, we select the optimal `k` and fit the K-Means algorithm to the PCA-transformed data.
 
 # %%
-# Assign silhouette-based optimal k to N_CLUSTERS for further use
-N_CLUSTERS = optimal_k_silhouette
+# Choose the smaller of the two optimal k values for a more conservative cluster count.
+# This provides a robust heuristic for selecting k.
+if optimal_k_silhouette < optimal_k_elbow:
+    log_and_print(f"Silhouette score suggests k={optimal_k_silhouette}, which is smaller than the elbow method's k={optimal_k_elbow}.")
+    N_CLUSTERS = optimal_k_silhouette
+else:
+    log_and_print(f"Elbow method suggests k={optimal_k_elbow}, which is smaller than or equal to the silhouette score's k={optimal_k_silhouette}.")
+    N_CLUSTERS = optimal_k_elbow
 
-# Ensure N_CLUSTERS is an integer and not None
-if N_CLUSTERS is None:
-    raise ValueError("N_CLUSTERS (optimal_k_silhouette) is None. Please check the silhouette calculation.")
+log_and_print(f"Final selection: Using {N_CLUSTERS} clusters for K-Means.")
+
+# Ensure N_CLUSTERS is a valid integer
+if not isinstance(N_CLUSTERS, int) or N_CLUSTERS <= 1:
+    raise ValueError(f"Invalid number of clusters determined: {N_CLUSTERS}. Please check calculations.")
 
 # Fit KMeans on the PCA-reduced data for efficiency and robustness
-kmeans = KMeans(n_clusters=int(N_CLUSTERS), random_state=42, n_init=10)
+kmeans = KMeans(n_clusters=N_CLUSTERS, random_state=42, n_init=10)
 cluster_labels = kmeans.fit_predict(X_pca)
 
 # Add cluster labels back to the original dataframe for analysis
@@ -268,10 +273,26 @@ fig_material.show()
 
 # In the next notebook, we will explore how these clusters interact with other features and evaluate their impact on model performance.
 
-# ## Key Findings & Next Steps
+# %% [markdown]
+# ## 6. Conclusion & Decision on Cluster Features
 #
-# - **Log Transformation is Key:** Applying a log transform before scaling led to more distinct clusters, confirming the insights from our EDA.
-# - **Meaningful Groups:** The K-Means algorithm successfully identified distinct, chemically meaningful groups within the dataset. For example, certain clusters are dominated by oxides, while others contain primarily metallic alloys.
-# - **Actionable Insights:** These identified clusters can now be used as a powerful categorical feature in our predictive models. This allows the model to learn different relationships for different types of materials, which can significantly boost predictive accuracy.
+# ### Summary of Findings
 #
-# The next logical step is to incorporate these cluster labels into our modeling workflow, which is explored in the advanced modeling notebooks.
+# This analysis successfully demonstrated that unsupervised learning can uncover meaningful, hidden structure within the materials dataset.
+#
+# 1.  **Meaningful Groups Identified:** K-Means clustering, applied to the PCA-reduced feature space, successfully partitioned the materials into distinct groups.
+# 2.  **Clusters are Chemically Relevant:** Through visualization and analysis, we confirmed that these clusters align well with known chemical families (e.g., oxides, intermetallics), providing valuable domain insight into the data landscape.
+#
+# ### The Final, Data-Driven Decision
+#
+# The primary hypothesis of this notebook was to test whether these engineered cluster labels could improve the performance of our predictive models.
+#
+# As will be shown rigorously in **Notebook #4**, adding the cluster labels as a categorical feature did **not** result in a statistically significant improvement to the final XGBoost model's predictive accuracy.
+#
+# **Therefore, based on this evidence, we will proceed without including the cluster labels in our final model.** This is a critical and realistic outcome in a data science project. The ability to rigorously test and discard features that do not add value is just as important as creating them, and it ensures our final model is both powerful and parsimonious.
+#
+# ### Next Steps
+#
+# The workflow now proceeds to the next notebook, where we will perform a comprehensive comparison of several machine learning models.
+#
+# **Next Notebook: [3_model_comparison.py](3_model_comparison.py)**
