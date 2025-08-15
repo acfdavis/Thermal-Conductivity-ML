@@ -2,165 +2,165 @@ import pandas as pd
 import numpy as np
 import re
 import os
-import joblib
 from matminer.datasets import load_dataset
 from sklearn.impute import SimpleImputer
 
 def load_and_standardize_citrine() -> pd.DataFrame:
+    """Loads and standardizes the Citrine dataset."""
+    print("Loading Citrine dataset...")
     df = load_dataset("citrine_thermal_conductivity")
-    if df is None:
-        return pd.DataFrame()
+    print(f"Citrine dataset shape before dropping NaNs: {df.shape}")
     df = df.dropna(subset=["k_expt"]).copy()
+    print(f"Citrine dataset shape after dropping NaNs: {df.shape}")
     return (
-        df.rename(columns={
-            "k_expt": "thermal_conductivity",
-            "k_condition": "temperature"
-        })
+        df.rename(columns={"k_expt": "thermal_conductivity", "k_condition": "temperature"})
         .assign(source="citrine")
     )
 
 def load_and_standardize_ucsb() -> pd.DataFrame:
+    """Loads and standardizes the UCSB dataset."""
+    print("Loading UCSB dataset...")
     df = load_dataset("ucsb_thermoelectrics")
-    if df is None:
-        return pd.DataFrame()
-    df = (
-        df.rename(columns={
-            "composition": "formula",
-            "temperature": "temperature",
-            "kappa": "thermal_conductivity"
-        })
+    print(f"UCSB dataset shape: {df.shape}")
+    return (
+        df.rename(columns={"composition": "formula", "temperature": "temperature", "kappa": "thermal_conductivity"})
         .assign(source="ucsb")
     )
+
+def _standardize_nist_property_names(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardizes the 'property' column in the NIST dataframe to simple labels
+    like 'thermalconductivity' and 'density'.
+    """
+    if 'property' not in df.columns:
+        return df
+
+    def clean_name(name):
+        name_lower = str(name).lower()
+        if 'thermal conductivity' in name_lower:
+            return 'thermalconductivity'
+        if 'density' in name_lower:
+            return 'density'
+        return None  # Return None for properties we don't care about
+
+    df['property'] = df['property'].apply(clean_name)
+    df.dropna(subset=['property'], inplace=True)
     return df
 
-def _filter_thermal_conductivity_data(df_data):
-    print("NIST Original shape:", df_data.shape)
-    
-    if "property" not in df_data.columns:
-        print("Missing 'property' column")
-        return pd.DataFrame()
-
-    conductivity_df = df_data[df_data['property'].str.contains('Thermal conductivity', case=False, na=False)]
-    print("NIST Conductivity rows:", conductivity_df.shape)
-
-    if "phase" not in conductivity_df.columns:
-        print("Missing 'phase' column")
-        return pd.DataFrame()
-
-    thermal_conductivity_crystalline = conductivity_df[
-        conductivity_df['phase'].str.contains('crystal', case=False, na=False)
-    ]
-    print("NIST Crystalline rows:", thermal_conductivity_crystalline.shape)
-
-    if thermal_conductivity_crystalline.empty:
-        print("No crystalline thermal conductivity data found.")
-        return pd.DataFrame()
-
-    cleaned_df = thermal_conductivity_crystalline.dropna(axis=1, how='all')
-    standardized_df = cleaned_df.rename(columns={
-        'value': 'thermal_conductivity',
-        'temperature': 'temperature',
-        'formula': 'formula'
-    }).assign(source="nist_thermoml")
-
-    return standardized_df
-
-
-def load_and_standardize_nist(project_root) -> pd.DataFrame:
-    """Load NIST ThermoML data, filter for thermal conductivity of crystalline solids."""
+def load_and_standardize_nist(project_root: str) -> pd.DataFrame:
+    """
+    Loads NIST ThermoML data, standardizes property names, and pivots the data
+    to have properties as columns.
+    """
+    print("Loading NIST dataset...")
     data_file = os.path.join(project_root, 'data', 'raw', 'thermoml_data.parquet')
-
-
+    if not os.path.exists(data_file):
+        print(f"NIST data file not found at {data_file}")
+        return pd.DataFrame()
+    print("Reading NIST data file...")
     df_data = pd.read_parquet(data_file)
+    print(f"NIST dataset shape before filtering: {df_data.shape}")
+    # Filter for crystalline solids first
+    if 'phase' in df_data.columns:
+        df_data = df_data[df_data['phase'].str.contains('crystal', case=False, na=False)].copy()
+    print(f"NIST dataset shape after filtering for crystalline solids: {df_data.shape}")
+    # Standardize property names BEFORE pivoting
+    df_data = _standardize_nist_property_names(df_data)
+    print(f"NIST dataset shape after standardizing property names: {df_data.shape}")
 
-    if isinstance(df_data, pd.DataFrame) and 'property' in df_data.columns:
-        df_data = df_data.dropna(subset=['property'])
+    if df_data.empty:
+        print("No relevant properties found in NIST crystalline data.")
+        return pd.DataFrame()
 
-    return _filter_thermal_conductivity_data(df_data)
+    # Pivot the table to get properties as columns
+    id_vars = ['formula', 'temperature']
+    id_vars = [col for col in id_vars if col in df_data.columns]
+    
+    df_pivot = df_data.pivot_table(
+        index=id_vars,
+        columns='property',
+        values='value',
+        aggfunc='first'  # Use the first valid measurement found
+    ).reset_index()
 
-
+    # Rename columns for consistency
+    rename_map = {
+        'thermalconductivity': 'thermal_conductivity'
+    }
+    df_pivot.rename(columns=rename_map, inplace=True)
+    df_pivot['source'] = 'nist_thermoml'
+    
+    return df_pivot
 
 def parse_temperature(val):
+    """Parses temperature values from strings into Kelvin."""
     if pd.isnull(val):
         return np.nan
     s = str(val).lower().strip()
-    m = re.search(r"([-+]?[0-9]*\.?[0-9]+)\s*°?\s*([ckf])", s)
+    # Look for numeric values, handling Celsius/Fahrenheit if specified
+    m = re.search(r"([-+]?[0-9]*\.?[0-9]+)\s*°?\s*([ckf])?", s)
     if m:
-        temp = float(m.group(1)); unit = m.group(2)
+        temp, unit = float(m.group(1)), m.group(2)
         if unit == 'c':
             return temp + 273.15
         elif unit == 'f':
             return (temp - 32) * 5/9 + 273.15
-        else:
-            return temp
-    m2 = re.search(r"([-+]?[0-9]*\.?[0-9]+)", s)
-    if m2:
-        return float(m2.group(1))
-    # Check for room temperature keywords
-    if "room" in s or "ambient" in s or "standard" in s:
+        return temp  # Assume Kelvin if no unit
+    if "room" in s or "ambient" in s:
         return 298.15
     return np.nan
 
-def load_and_merge_data(project_root, drop_missing=True):
+def load_and_merge_data(project_root: str, drop_missing: bool = True) -> pd.DataFrame:
     """
-    Load and combine datasets from Citrine, UCSB, and NIST.
-    Optionally drop rows missing formula, temperature, or thermal_conductivity.
-    Returns a cleaned, merged DataFrame ready for feature engineering.
+    Loads, merges, and cleans data from Citrine, UCSB, and NIST sources.
     """
     print("Loading datasets...")
     citrine_df = load_and_standardize_citrine()
-    print(f"Citrine data loaded: {citrine_df.shape}")
     ucsb_df = load_and_standardize_ucsb()
-    print(f"UCSB data loaded: {ucsb_df.shape}")
     nist_df = load_and_standardize_nist(project_root)
+    
+    print(f"Citrine data loaded: {citrine_df.shape}")
+    print(f"UCSB data loaded: {ucsb_df.shape}")
     print(f"NIST data loaded: {nist_df.shape}")
 
-    datasets_to_combine = []
-    if not citrine_df.empty:
-        datasets_to_combine.append(citrine_df)
-    if not ucsb_df.empty:
-        datasets_to_combine.append(ucsb_df)
-    if not nist_df.empty:
-        datasets_to_combine.append(nist_df)
+    # Combine all datasets
+    df_all = pd.concat([citrine_df, ucsb_df, nist_df], ignore_index=True)
 
-    if datasets_to_combine:
-        df_all = pd.concat(datasets_to_combine, ignore_index=True)
-        print(f"Combined dataset shape: {df_all.shape}")
-        # Standardize temperature and drop duplicates
-        df_all["temperature"] = df_all["temperature"].apply(parse_temperature)
-        df_all = df_all.drop_duplicates(subset=["formula", "temperature"], keep="first").reset_index(drop=True)
-        # Optionally drop rows missing any critical field
-        if drop_missing:
-            df_all = df_all.dropna(subset=["formula", "temperature", "thermal_conductivity"]).reset_index(drop=True)
-        # Group and average kappa for duplicate entries
-        df_feat = (
-            df_all
-            .groupby(["formula", "temperature"])
-            .agg({
-                "thermal_conductivity": "mean",
-                "source": lambda s: ",".join(sorted(set(s)))
-            })
-            .reset_index()
-        )
-        print(f"Shape after grouping and cleaning: {df_feat.shape}")
-        return df_feat
-    else:
-        print("No datasets were successfully loaded.")
-        return pd.DataFrame()
+    # Clean temperature
+    df_all["temperature"] = df_all["temperature"].apply(parse_temperature)
+    
+    # Drop duplicates, keeping the most complete record by prioritizing sources
+    df_all['source_cat'] = pd.Categorical(df_all['source'], categories=['citrine', 'ucsb', 'nist_thermoml'], ordered=True)
+    df_all = df_all.sort_values('source_cat')
+    df_all = df_all.drop_duplicates(subset=['formula', 'temperature'], keep='first')
+    df_all = df_all.drop(columns='source_cat')
+
+    # Final cleaning of target variable
+    if drop_missing:
+        df_all = df_all.dropna(subset=["formula", "temperature", "thermal_conductivity"]).reset_index(drop=True)
+
+    # Group by formula and temperature to get a single entry with all available info
+    agg_dict = {
+        "thermal_conductivity": "mean",
+        "source": lambda s: ",".join(sorted(set(s)))
+    }
+
+    df_final = df_all.groupby(['formula', 'temperature']).agg(agg_dict).reset_index()
+    print(f"Shape after merging and cleaning: {df_final.shape}")
+    
+    return df_final
 
 def impute_and_clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Clean and impute missing values in the DataFrame.
-    Applies temperature parsing and imputes missing temperature values (only if justified).
-    Drops rows missing formula or thermal_conductivity.
-    Use with caution: imputation should only be used if physically justified.
+    Cleans and imputes missing values in the DataFrame.
     """
     df_cleaned = df.copy()
     df_cleaned["temperature"] = df_cleaned["temperature"].apply(parse_temperature)
-    # Only impute if a strong physical/statistical justification exists
+    
     if df_cleaned["temperature"].isnull().any():
-        print("Warning: Imputing missing temperature values with mean. Ensure this is physically justified.")
+        print("Warning: Imputing missing temperature values with mean.")
         imputer = SimpleImputer(strategy="mean")
         df_cleaned["temperature"] = imputer.fit_transform(df_cleaned[["temperature"]])
+        
     df_cleaned = df_cleaned.dropna(subset=["formula", "thermal_conductivity"]).reset_index(drop=True)
     return df_cleaned

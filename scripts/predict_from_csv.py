@@ -37,6 +37,7 @@ else:
 
 
 from src.features import featurize_data
+from src.cluster_features import add_cluster_label
 
 # Define the columns required in the input CSV
 REQUIRED_COLUMNS = ["formula", "temperature", "pressure", "phase"]
@@ -65,31 +66,46 @@ def validate_input_columns(df):
         raise ValueError(f"Input CSV is missing required columns: {missing_cols}")
     print("Input columns validated.")
 
-def make_predictions(model, scaler, selected_features, input_df):
+def make_predictions(model, scaler, selected_features_from_file, input_df):
     """Runs the full prediction pipeline on new data."""
-    # 1. Generate all features using the matminer library
+    # 1. Generate all available features, including the cluster label
     print("Step 1: Generating features for input data...")
     X_featurized = featurize_data(input_df)
+    X_featurized = add_cluster_label(X_featurized, models_dir="models")
     print(f"Generated {X_featurized.shape[1]} features.")
 
-    # 2. Select the subset of features the model was trained on
-    print(f"Step 2: Selecting the {len(selected_features)} features the model was trained on...")
-    # Ensure the columns are in the same order as during training
-    X_selected = X_featurized[selected_features]
+    # 2. Get the list of features the model ACTUALLY expects from the model object itself
+    # This is the most reliable source of truth and overrides the JSON file.
+    model_features = model.get_booster().feature_names
+    print(f"Step 2: Preparing the {len(model_features)} features the model was trained on...")
 
-    # 3. Scale the features using the previously fitted scaler
+    # 3. Select and order the columns based on the model's internal list
+    X_selected = X_featurized.reindex(columns=model_features)
+
+    # Handle any potential missing values
+    if X_selected.isnull().values.any():
+        print("Warning: Missing values detected after feature selection. Filling with 0.")
+        X_selected = X_selected.fillna(0)
+
+    # 4. Scale the features using the previously fitted scaler
+    # The scaler should have been trained on the same feature set as the model.
     print("Step 3: Scaling features...")
-    X_scaled = scaler.transform(X_selected)
-
-    # 4. Predict on the log-transformed scale
-    print("Step 4: Making predictions...")
-    log_predictions = model.predict(X_scaled)
-
-    # 5. Inverse transform the predictions to the original scale
-    print("Step 5: Applying inverse transformation to predictions...")
-    final_predictions = np.expm1(log_predictions)
+    X_scaled_data = scaler.transform(X_selected)
     
-    return final_predictions
+    # Create a DataFrame with the scaled data, preserving column names and order.
+    # This DataFrame is now ready for prediction.
+    X_final = pd.DataFrame(X_scaled_data, columns=model_features, index=input_df.index)
+
+    # 5. Make predictions
+    print("Step 4: Making predictions...")
+    # The model predicts the log-transformed value
+    log_predictions = model.predict(X_final)
+
+    # 6. Apply the inverse transformation to get the final prediction
+    # np.expm1 is the inverse of np.log1p (log(1+x))
+    predictions = np.expm1(log_predictions)
+
+    return predictions
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Predict thermal conductivity from a CSV file.")

@@ -551,11 +551,11 @@ def plot_residuals(model, X_test, y_test_log, model_name):
 def plot_density_by_cluster(df):
     """Plots the density distribution for each cluster."""
     fig = px.box(
-        df.dropna(subset=['mp_density']),
+        df.dropna(subset=['density']),
         x='cluster_label', 
-        y='mp_density', 
+        y='density', 
         color='cluster_label',
-        labels={'cluster_label': 'Cluster', 'mp_density': 'Density (g/cm³)'},
+        labels={'cluster_label': 'Cluster', 'density': 'Density (g/cm³)'},
     )
     return _apply_common_layout(fig, 'Density Distribution by Cluster')
 

@@ -1,0 +1,18 @@
+services:
+  tf:
+    build:
+      context: .
+      dockerfile: Dockerfile.tf
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+
+  torch:
+    build:
+      context: .
+      dockerfile: Dockerfile.torch
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env

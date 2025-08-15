@@ -2,7 +2,7 @@
 # coding: utf-8
 
 # %% [markdown]
-# # Exploratory Data Analysis for Thermal Conductivity Prediction
+# ## Exploratory Data Analysis for Thermal Conductivity Prediction
 #
 # ## 1. Project Objective
 #
@@ -41,12 +41,11 @@ except NameError:
     # Fallback for interactive environments (Jupyter, VSCode)
     PROJECT_ROOT = os.path.abspath(os.path.join(os.getcwd()))
 
-# Add the 'src' directory to the Python path
-SRC_PATH = os.path.join(PROJECT_ROOT, 'src')
-if SRC_PATH not in sys.path:
-    sys.path.insert(0, SRC_PATH)
+# Add the project root to the Python path, not the 'src' directory
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from utils import (
+from src.utils import (
     load_or_process_dataframe,
     setup_environment,
     save_plot,
@@ -54,7 +53,7 @@ from utils import (
     log_and_print,
     perform_normality_tests
 )
-from viz import (
+from src.viz import (
     plot_numeric_histograms_paginated,
     plot_numeric_histograms_log_paginated,
     plot_tc_histograms
@@ -72,9 +71,17 @@ HIST_TC_PATH = os.path.join(PLOTS_DIR, 'eda_tc_histograms.pdf')
 CORR_MATRIX_PATH = os.path.join(PLOTS_DIR, 'eda_corr_matrix.pdf')
 
 # --- Load and Featurize Data (with Caching) ---
-df = load_or_process_dataframe(cache_path=CACHE_PATH)
+df = load_or_process_dataframe(cache_path=CACHE_PATH, project_root=PROJECT_ROOT)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 style_df(df.head())
+
+# %%
+# --- List All Feature Names ---
+log_and_print("\n--- All Available Features ---")
+# Convert to list and sort for easier reading
+feature_list = sorted(df.columns.tolist())
+for feature in feature_list:
+    print(feature)
 
 # %% [markdown]
 # ## 2. Exploratory Data Analysis (EDA)
@@ -177,7 +184,7 @@ style_df(normality_results.sort_values(by="P-Value", ascending=False))
 # %% [markdown]
 # **Interpretation:**
 #
-# *   The summary table confirms our visual assessment. The **skewness** drops from `8.0` to `0.4` after the log transformation, indicating a significant improvement in symmetry.
+# *   The summary table confirms our visual assessment. The **skewness** drops from `23.8` to `1.27` after the log transformation, indicating a significant improvement in symmetry.
 # *   The Shapiro-Wilk test p-values (where p < 0.05 suggests non-normality) provide statistical evidence of this improvement. While the log-transformed data is still not perfectly normal (p-value is very small), it is substantially closer and better satisfies the assumptions of many models.
 # *   The table above shows the normality test results for all numeric features. Most features are not normally distributed, which reinforces the importance of using transformations or non-parametric methods in subsequent modeling steps.
 
@@ -214,8 +221,8 @@ plt.show()
 # %% [markdown]
 # **Interpretation:**
 #
-# *   The heatmap above highlights the features most strongly correlated with thermal conductivity, such as `density` and `vickers_hardness`.
-# *   We also observe high correlations between some independent features (e.g., `density` and `atomic_mass`). This indicates potential multicollinearity, which can affect the interpretability and stability of some linear models. This analysis is crucial for guiding feature selection and engineering in the subsequent modeling stages.
+# *   The heatmap above highlights the features most strongly correlated with thermal conductivity, such as `energy above hull` and `minimum_NpUnfilled`.
+# *   We also observe high correlations between some independent features (e.g., `minimum_NpUnfilled` and `minimum_NpValence`). This indicates potential multicollinearity, which can affect the interpretability and stability of some linear models. This analysis is crucial for guiding feature selection and engineering in the subsequent modeling stages.
 
 # %% [markdown]
 # ## 3. Conclusion and Next Steps

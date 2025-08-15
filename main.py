@@ -7,7 +7,6 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
-from src.data import load_and_merge_data, impute_and_clean_data  # You must define this if not present
 from src.features import featurize_data
 from src.modeling import evaluate_model, save_model
 

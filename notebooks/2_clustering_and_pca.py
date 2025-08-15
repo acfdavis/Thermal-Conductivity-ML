@@ -21,6 +21,11 @@
 # --- Imports and Setup ---
 import os
 import sys
+
+# Set the OMP_NUM_THREADS environment variable to avoid a memory leak on Windows with MKL.
+# This is a known issue with scikit-learn's KMeans and is the recommended workaround.
+os.environ['OMP_NUM_THREADS'] = '3'
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -29,6 +34,8 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.impute import SimpleImputer
 import plotly.graph_objects as go
+import joblib
+from pathlib import Path
 
 # Ensure src directory is added to sys.path for modular imports
 try:
@@ -78,7 +85,7 @@ CLUSTER_SUMMARY_PATH = os.path.join(PLOTS_DIR, 'clustering_summary_table.csv')
 
 
 # --- Load featurized data using robust utility ---
-df = load_or_process_dataframe(cache_path=CACHE_PATH)
+df = load_or_process_dataframe(cache_path=CACHE_PATH, project_root=PROJECT_ROOT)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 style_df(df.head())
 
@@ -158,8 +165,21 @@ for k in k_range:
 optimal_k_silhouette = k_range[int(np.argmax(silhouette_scores))]
 log_and_print(f"Optimal k determined using silhouette score: {optimal_k_silhouette}")
 
-fig_silhouette = go.Figure(data=go.Scatter(x=k_range, y=silhouette_scores, mode='lines+markers'))
-fig_silhouette.update_layout(title='Silhouette Scores for k', xaxis_title='Number of Clusters (k)', yaxis_title='Silhouette Score')
+fig_silhouette = go.Figure()
+fig_silhouette.add_trace(go.Scatter(x=k_range, y=silhouette_scores, mode='lines+markers', name='Silhouette Score'))
+fig_silhouette.add_trace(go.Scatter(
+    x=[optimal_k_silhouette],
+    y=[max(silhouette_scores)],
+    mode='markers',
+    marker=dict(color='red', size=12, symbol='x'),
+    name=f'Optimal k = {optimal_k_silhouette}'
+))
+fig_silhouette.update_layout(
+    title='Silhouette Scores for Optimal k',
+    xaxis_title='Number of Clusters (k)',
+    yaxis_title='Silhouette Score',
+    showlegend=True
+)
 save_plot(fig_silhouette, SILHOUETTE_PATH)
 fig_silhouette.show()
 
@@ -227,6 +247,19 @@ save_plot(fig_combo, STRUCT_CHEM_PATH)
 fig_combo.show()
 
 # %% [markdown]
+# ### Domain Insight: Interpreting the Cluster Composition
+#
+# The plots above provide strong evidence that the unsupervised learning has discovered chemically meaningful patterns in the data. Here are the key takeaways:
+#
+# *   **Chemistry is the Primary Separator:** The clusters are clearly delineated by chemical family. For instance, **Clusters 1 and 11 are entirely composed of oxides.** This is a powerful validation that the PCA, driven by elemental features, is capturing fundamental chemical differences. Oxygen's unique properties create a strong, distinct signal that separates these materials from others.
+#
+# *   **Crystal Structure Provides Finer Detail:** Within these broad chemical groups, crystal structure acts as a secondary organizing principle. The concentration of **orthorhombic oxides** within Cluster 11 is a perfect example. This shows that the model can distinguish structural variations, but only after the primary chemical grouping is established.
+#
+# *   **"Mixed" Clusters Reflect Real-World Complexity:** The fact that many clusters contain a mix of chemistries and structures is not a flaw, but an important finding. It reflects the reality of materials science, where properties exist on a continuum. These clusters group materials that are "similar" based on their most dominant features, even if they have different categorical labels.
+#
+# This analysis provides a data-driven justification for why these engineered cluster features, while insightful, do not ultimately improve the predictive model's performance. The model likely gains more value from the continuous, underlying elemental features than from these broad, somewhat mixed categorical labels.
+
+# %% [markdown]
 # ### Quantitative Cluster Summary
 #
 # To complement the visualizations, we'll create a summary table that shows the mean `thermal_conductivity` and `density` for each cluster. This helps us quantitatively characterize and compare the groups.
@@ -240,7 +273,7 @@ fig_density.show()
 # Create a summary dataframe
 cluster_summary = df.groupby('cluster_label').agg(
     mean_thermal_conductivity=('thermal_conductivity', 'mean'),
-    mean_density=('mp_density', 'mean'),
+    mean_density=('density', 'mean'),
     count=('formula', 'count')
 ).reset_index()
 
@@ -296,3 +329,25 @@ fig_material.show()
 # The workflow now proceeds to the next notebook, where we will perform a comprehensive comparison of several machine learning models.
 #
 # **Next Notebook: [3_model_comparison.py](3_model_comparison.py)**
+
+# --- Save the PCA and KMeans artifacts for the prediction script ---
+import joblib
+from pathlib import Path
+
+# Define the directory to save artifacts
+ARTIFACTS_DIR = Path(PROJECT_ROOT) / "models"
+ARTIFACTS_DIR.mkdir(exist_ok=True)
+
+# Save the fitted models
+joblib.dump(pca, ARTIFACTS_DIR / "pca.pkl")
+joblib.dump(kmeans, ARTIFACTS_DIR / "kmeans.pkl")
+
+# Save the list of columns that were used as input to the PCA.
+# The columns from X_log are the ones that were scaled and fed into PCA.
+with open(ARTIFACTS_DIR / "pca_input_columns.txt", "w") as f:
+    for col in X_log.columns:
+        f.write(f"{col}\n")
+
+print(f"Saved PCA, KMeans, and column list to {ARTIFACTS_DIR}")
+
+# %%
