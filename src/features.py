@@ -29,7 +29,7 @@ from mp_api.client import MPRester
 from pymatgen.core import Composition, Structure
 from tqdm import tqdm
 
-from .data import impute_and_clean_data, load_and_merge_data
+from data import impute_and_clean_data, load_and_merge_data
 
 
 def featurize_data(df, composition_col='formula', cache_path=None):
@@ -123,13 +123,24 @@ def featurize_data(df, composition_col='formula', cache_path=None):
         df_jarvis['crystal_system'] = df_jarvis['crystal_system'].astype(str)
 
     if cache_path:
+        # Ensure the parent directory exists before attempting to write the parquet file.
+        parent_dir = os.path.dirname(cache_path)
+        if parent_dir:
+            try:
+                os.makedirs(parent_dir, exist_ok=True)
+                # Helpful debug message in case directory needed to be created
+                if not os.path.exists(parent_dir):
+                    print(f"Created cache directory {parent_dir}")
+            except Exception as e:
+                # Non-fatal: we'll still try to write and let pandas raise a clear error if it fails
+                print(f"Warning: could not create cache directory {parent_dir}: {e}")
+
         try:
             df_jarvis.to_parquet(cache_path, index=False)
             print(f"Features cached to {cache_path}.")
         except Exception as e:
             print(f"Error caching to Parquet: {e}")
-            # Fallback or further error handling can be added here
-            # For example, converting all object columns to string
+            # Fallback: convert all object columns to string and retry
             print("Attempting to convert all object columns to string and re-caching...")
             for col in df_jarvis.select_dtypes(include=['object']).columns:
                 df_jarvis[col] = df_jarvis[col].astype(str)
