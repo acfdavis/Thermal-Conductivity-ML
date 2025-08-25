@@ -2,8 +2,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# %%
-# # Predicting Thermal Conductivity of Inorganic Materials via Machine Learning
+# %% [markdown]
+# ## Predicting Thermal Conductivity of Inorganic Materials via Machine Learning
 # 
 # **Project Objective:** To develop a robust machine learning pipeline for predicting the thermal conductivity of inorganic materials, leveraging composition-based features. This project demonstrates an end-to-end workflow, from data integration and feature engineering to model comparison and interpretation.
 # 
@@ -16,8 +16,8 @@
 # 
 # This notebook serves as the core of the analysis, focusing on model evaluation and selection.
 
-# %%
-# # Accelerating Materials Discovery with Machine Learning
+# %% [markdown]
+# ## Accelerating Materials Discovery with Machine Learning
 # 
 # This notebook demonstrates a data-driven approach to predict the thermal conductivity of inorganic compounds. By integrating domain knowledge from materials science with robust machine learning techniques, we build interpretable models that can accelerate the discovery of novel materials.
 # 
@@ -45,8 +45,8 @@
 # 
 # 
 
-# %%
-# # Data Loading, Cleaning, and Feature Gathering
+# %% [markdown]
+# ## Data Loading, Cleaning, and Feature Gathering
 
 # %%
 # In[ ]:
@@ -114,7 +114,7 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 
 # --- Load featurized data using robust utility ---
 CACHE_PATH = os.path.join(PROJECT_ROOT, 'data', 'processed', 'featurized.parquet')
-df = load_or_process_dataframe(cache_path=CACHE_PATH)
+df = load_or_process_dataframe(cache_path=CACHE_PATH, project_root=PROJECT_ROOT)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 style_df(df.head())
 

@@ -89,7 +89,7 @@ SHAP_BEESWARM_PATH = os.path.join(PLOTS_DIR, 'feat_eng_shap_beeswarm.pdf')
 SHAP_DEPENDENCE_PATH = os.path.join(PLOTS_DIR, 'feat_eng_shap_dependence.pdf')
 
 # --- Load featurized data using robust utility ---
-df = load_or_process_dataframe(cache_path=CACHE_PATH)
+df = load_or_process_dataframe(cache_path=CACHE_PATH, project_root=PROJECT_ROOT)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 style_df(df.head())
 

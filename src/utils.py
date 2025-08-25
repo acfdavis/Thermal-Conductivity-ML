@@ -125,9 +125,13 @@ def prepare_data_for_modeling(df, target_col='thermal_conductivity'):
     nan_cols = X.columns[X.isna().any()].tolist()
     if nan_cols:
         print(f"Imputing NaN values in columns: {nan_cols}")
+        # Keep track of columns that are not all NaN
+        valid_columns = X.columns[~X.isna().all()]
         imputer = SimpleImputer(strategy='mean')
+        # Fit on the data and transform
         X_imputed = imputer.fit_transform(X)
-        X = pd.DataFrame(X_imputed, columns=X.columns, index=X.index)
+        # Reconstruct the DataFrame with the correct columns
+        X = pd.DataFrame(X_imputed, columns=valid_columns, index=X.index)
     
     return X, y
 
@@ -278,29 +282,31 @@ def display_markdown(md_str):
     from IPython.display import display, Markdown
     display(Markdown(md_str))
 
-def process_and_featurize(cache_path, composition_col='formula'):
+def process_and_featurize(cache_path: str, project_root: str, composition_col: str = "formula") -> pd.DataFrame:
     """
     Load, clean, and featurize raw data, then cache the result.
     Args:
-        cache_path (str): Path to cache the featurized DataFrame.
-        composition_col (str): Name of the column with chemical formulas.
+        cache_path (str): Path to the cache file.
+        project_root (str): The root directory of the project.
+        composition_col (str): Name of the column containing chemical compositions.
     Returns:
         pd.DataFrame: The featurized DataFrame.
     """
-    from data import load_and_merge_data, impute_and_clean_data
-    from features import featurize_data
-    df_raw = load_and_merge_data()
+    from .data import load_and_merge_data, impute_and_clean_data
+    from .features import featurize_data
+    df_raw = load_and_merge_data(project_root=project_root)
     df_clean = impute_and_clean_data(df_raw)
-    return featurize_data(df_clean, composition_col=composition_col, cache_path=cache_path)
+    df_featurized = featurize_data(df_clean, composition_col=composition_col, cache_path=cache_path)
+    return df_featurized
 
 
-def load_or_process_dataframe(cache_path: str) -> pd.DataFrame:
+def load_or_process_dataframe(cache_path: str, project_root: str) -> pd.DataFrame:
     """Load a DataFrame from cache if it exists, else process and cache it."""
     df = load_cached_dataframe(cache_path)
     if df is not None:
         print(f"Loaded cached DataFrame from {cache_path}")
         return df
-    df = process_and_featurize(cache_path)
+    df = process_and_featurize(cache_path, project_root)
     cache_dataframe(df, cache_path)
     print(f"Processed and cached DataFrame to {cache_path}")
     return df

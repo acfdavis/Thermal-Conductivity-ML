@@ -72,7 +72,7 @@ SHAP_PLOT_PATH = os.path.join(PLOTS_DIR, 'tuned_xgb_model_shap_summary.pdf')
 COMPARISON_TABLE_PATH = os.path.join(PLOTS_DIR, 'final_model_comparison.csv')
 
 # --- Load featurized data using robust utility ---
-df = load_or_process_dataframe(cache_path=CACHE_PATH)
+df = load_or_process_dataframe(cache_path=CACHE_PATH, project_root=PROJECT_ROOT)
 log_and_print(f"Featurized dataframe shape: {df.shape}")
 
 # %% [markdown]

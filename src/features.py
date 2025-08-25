@@ -7,21 +7,29 @@ This module contains functions to generate and transform features for thermal co
 import os
 import re
 from dotenv import load_dotenv
-from pymatgen.core import Composition
-from matminer.featurizers.composition import ElementProperty
-from jarvis.db.figshare import data as jdata
-from tqdm import tqdm
+import numpy as np
 import pandas as pd
-import joblib
-from mp_api.client import MPRester
-from sklearn.decomposition import PCA
+from jarvis.core.atoms import Atoms
+from jarvis.db.figshare import data as jdata
 from matminer.featurizers.base import MultipleFeaturizer
-from matminer.featurizers.composition import ElementProperty, Stoichiometry, ValenceOrbital
-from matminer.featurizers.structure import DensityFeatures
-from pymatgen.core import Composition
+from matminer.featurizers.composition import (
+    ElementProperty,
+    IonProperty,
+    Stoichiometry,
+    ValenceOrbital,
+)
+from matminer.featurizers.structure import (
+    BondFractions,
+    EwaldEnergy,
+    MaximumPackingEfficiency,
+    SiteStatsFingerprint,
+    StructuralHeterogeneity,
+)
+from mp_api.client import MPRester
+from pymatgen.core import Composition, Structure
+from tqdm import tqdm
 
-# Use an absolute import from `src` as it's added to sys.path
-from data import load_and_merge_data, impute_and_clean_data
+from .data import impute_and_clean_data, load_and_merge_data
 
 
 def featurize_data(df, composition_col='formula', cache_path=None):
@@ -94,6 +102,19 @@ def featurize_data(df, composition_col='formula', cache_path=None):
     #    # Apply the classification function only to those rows
     #    df_jarvis.loc[unknown_mask, 'crystal_structure'] = df_jarvis.loc[unknown_mask, 'MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
 
+    # Create a unified density column
+    df_jarvis["density"] = (
+        df_jarvis["mp_density"]
+        if "mp_density" in df_jarvis
+        else pd.Series(dtype=float)
+    ).combine_first(
+        df_jarvis["jarvis_density"]
+        if "jarvis_density" in df_jarvis
+        else pd.Series(dtype=float)
+    )
+    # Coerce to numeric, coercing errors will set invalid parsing as NaN
+    df_jarvis["density"] = pd.to_numeric(df_jarvis["density"], errors="coerce")
+
 
     print("Feature engineering complete.")
     
@@ -138,11 +159,12 @@ def add_composition_features(df, composition_column='formula'):
     stoich_featurizer.set_n_jobs(1)
     df = stoich_featurizer.featurize_dataframe(df, col_id="composition")
 
-    valence_featurizer = ValenceOrbital()
+    valence_featurizer = ValenceOrbital(impute_nan=True)
     valence_featurizer.set_n_jobs(1)
     df = valence_featurizer.featurize_dataframe(df, col_id="composition")
 
-    df = df.drop('composition', axis=1)
+    if df is not None:
+        df = df.drop("composition", axis=1)
     return df
 
 def normalize_column_names(df):
@@ -184,15 +206,14 @@ def add_materials_project_features(df, api_key):
 
                 docs_by_formula = {}
                 for doc in docs:
-                    # Ensure the dictionary structure is correct or handle missing attributes
-                    if 'formula_pretty' in doc:
-                        f = doc['formula_pretty']
-                    else:
-                        f = None
-
-                    if f not in docs_by_formula or (
+                    f = doc.formula_pretty
+                    # Get the current best doc for this formula
+                    current_best_doc = docs_by_formula.get(f)
+                    
+                    # If there is no doc yet, or the new doc is better, update
+                    if not current_best_doc or (
                         getattr(doc, 'energy_above_hull', float('inf')) <
-                        getattr(docs_by_formula[f], 'energy_above_hull', float('inf'))
+                        getattr(current_best_doc, 'energy_above_hull', float('inf'))
                     ):
                         docs_by_formula[f] = doc
 
@@ -202,31 +223,31 @@ def add_materials_project_features(df, api_key):
                         "formula": doc.formula_pretty,
                         "mp_formula": doc.formula_pretty,
                         "material_id": str(doc.material_id),
-                        "mp_density": getattr(doc, 'density', None),
-                        "mp_volume": getattr(doc, 'volume', None),
-                        "mp_band_gap": getattr(doc, 'band_gap', None),
-                        "is_metal": getattr(doc, 'is_metal', None),
-                        "energy_above_hull": getattr(doc, 'energy_above_hull', None),
-                        "crystal_system": getattr(symmetry, 'crystal_system', None) if symmetry else None,
-                        "spacegroup": getattr(symmetry, 'number', None) if symmetry else None
+                        "mp_density": getattr(doc, "density", None),
+                        "mp_volume": getattr(doc, "volume", None),
+                        "mp_band_gap": getattr(doc, "band_gap", None),
+                        "mp_is_metal": getattr(doc, "is_metal", None),
+                        "mp_energy_above_hull": getattr(doc, "energy_above_hull", None),
+                        "crystal_system": getattr(symmetry, "crystal_system", None).name if symmetry and hasattr(symmetry, "crystal_system") and hasattr(getattr(symmetry, "crystal_system"), "name") else None,
+                        "mp_spacegroup": getattr(symmetry, "symbol", None) if symmetry else None,
                     })
-
             except Exception as e:
-                print(f"An error occurred during Materials Project query for batch {i//batch_size}: {e}")
+                print(f"An error occurred during Materials Project query for batch {i//batch_size + 1}: {e}")
 
     print(f"Finished Materials Project query. Fetched data for {len(materials_data_list)} materials.")
 
     if materials_data_list:
-        materials_df = pd.DataFrame(materials_data_list)
-        materials_df = materials_df.drop_duplicates(subset=['formula'])
-        df = pd.merge(df, materials_df, on="formula", how="left")
+        mp_df = pd.DataFrame(materials_data_list)
+        # Use the original formula for merging to handle any inconsistencies
+        df = pd.merge(df, mp_df, on="formula", how="left")
 
     return df
 
 
 def add_jarvis_features(df):
     """
-    Enrich the dataframe with features from the JARVIS-DFT database.
+    Enrich the dataframe with thermal-transport-relevant features from the JARVIS-DFT database.
+    Includes density, elastic constants, bond lengths, packing, anisotropy, etc.
     """
     jdft_3d = jdata('dft_3d')
     formula_to_jarvis = {item['formula']: item for item in jdft_3d}
@@ -235,6 +256,12 @@ def add_jarvis_features(df):
     for formula in tqdm(formulas, desc="Fetching JARVIS Data"):
         if formula in formula_to_jarvis:
             item = formula_to_jarvis[formula]
+            # Compute density from structure
+            try:
+                structure = Structure.from_dict(item['atoms'])
+                density_val = structure.density  # g/cm^3
+            except Exception:
+                density_val = None
             jarvis_data.append({
                 'formula': formula,
                 'jarvis_bulk_modulus': item.get('bulk_modulus_vrh'),
@@ -242,13 +269,28 @@ def add_jarvis_features(df):
                 'jarvis_band_gap': item.get('optb88vdw_bandgap'),
                 'jarvis_formation_energy': item.get('formation_energy_peratom'),
                 'jarvis_debye_temp': item.get('debye_temp'),
+                'jarvis_density': density_val,
+                'jarvis_avg_mass': item.get('avg_mass'),
+                'jarvis_natoms': item.get('natoms'),
+                'jarvis_packing_fraction': item.get('packing_fraction'),
+                'jarvis_min_bond_length': item.get('min_bond_length'),
+                'jarvis_avg_bond_length': item.get('avg_bond_length'),
+                'jarvis_elastic_anisotropy': item.get('elastic_anisotropy'),
+                'jarvis_is_metal': item.get('is_metal'),
                 'jarvis_eps_electronic': item.get('eps_electronic'),
                 'jarvis_eps_total': item.get('eps_total')
             })
-
     results_df = pd.DataFrame(jarvis_data)
     if not results_df.empty:
-        results_df.dropna(how='all', subset=['jarvis_bulk_modulus', 'jarvis_shear_modulus', 'jarvis_band_gap', 'jarvis_formation_energy', 'jarvis_debye_temp', 'jarvis_eps_electronic', 'jarvis_eps_total'], inplace=True)
+        results_df.dropna(
+            how='all',
+            subset=[
+                'jarvis_bulk_modulus', 'jarvis_shear_modulus', 'jarvis_band_gap',
+                'jarvis_formation_energy', 'jarvis_debye_temp', 'jarvis_density',
+                'jarvis_avg_mass', 'jarvis_natoms', 'jarvis_packing_fraction'
+            ],
+            inplace=True
+        )
         df = pd.merge(df, results_df, on='formula', how='left')
     print(f"Successfully fetched data for {len(results_df)} of {len(formulas)} unique formulas from JARVIS.")
     return df
@@ -324,3 +366,21 @@ def classify_material(formula):
             return "Intermetallic/Alloy"
     except Exception:
         return "Unknown"
+
+def density(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Combines 'mp_density' and 'jarvis_density' columns into a single 'density' column.
+    Prioritizes 'mp_density' if available, otherwise uses 'jarvis_density'.
+    Drops the original density columns.
+
+    Parameters:
+        df (pd.DataFrame): Input DataFrame containing 'mp_density' and 'jarvis_density'.
+
+    Returns:
+        pd.DataFrame: DataFrame with combined 'density' column.
+    """
+    df['density'] = df[['mp_density', 'jarvis_density']].apply(
+        lambda row: row['mp_density'] if pd.notnull(row['mp_density']) else row['jarvis_density'], axis=1
+    )
+    df.drop(columns=['mp_density', 'jarvis_density'], inplace=True, errors='ignore')
+    return df
