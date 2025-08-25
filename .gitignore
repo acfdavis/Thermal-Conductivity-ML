@@ -17,7 +17,6 @@ data/processed/
 
 # Models & artifacts
 *.pkl
-*.joblib
 *.h5
 
 # OS
