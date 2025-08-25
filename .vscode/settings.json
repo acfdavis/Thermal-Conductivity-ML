@@ -5,8 +5,5 @@
         "."
     ],
     "python.testing.autoTestDiscoverOnSaveEnabled": true,
-    "python.defaultInterpreterPath": "python",
-    "python.analysis.extraPaths": [
-        "./src"
-    ]
+    "python.defaultInterpreterPath": "python"
 }
