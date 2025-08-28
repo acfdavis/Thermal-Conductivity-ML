@@ -1,7 +1,23 @@
-formula,temperature,pressure,phase
-SiO2,300,101325,solid
-Bi2Te3,300,101325,solid
-GaN,300,101325,solid
-SiC,300,101325,solid
-Si,300,101325,solid
-SrTiO3,300,101325,solid
+formula,temperature,pressure,phase,space_group,notes
+SiO2,300,101325,solid,221,SiO2 given SG 221 (Pm-3m) - not a common SiO2 polymorph (placeholder cubic; real quartz 154 cristobalite 227 stishovite 136)
+Bi2Te3,300,101325,solid,166,Bi2Te3 rhombohedral R-3m (space group 166) - layered thermoelectric
+GaN,300,101325,solid,186,Wurtzite GaN (P63mc 186)
+SiC,300,101325,solid,186,Hexagonal (wurtzite-like polytype) SiC (2H) - 3C polytype would be 216
+Si,300,101325,solid,227,Diamond cubic Si (Fd-3m 227)
+SrTiO3,300,101325,solid,221,Perovskite SrTiO3 (Pm-3m 221)
+C,300,101325,solid,227,Diamond (Fd-3m 227)
+C,300,101325,solid,194,Graphite (P63/mmc 194) - anisotropic
+AlN,300,101325,solid,186,Wurtzite AlN (P63mc 186)
+Al2O3,300,101325,solid,167,Corundum Al2O3 (R-3c 167)
+MgO,300,101325,solid,225,Rocksalt MgO (Fm-3m 225)
+Cu,300,101325,solid,225,FCC Cu (Fm-3m 225) high thermal conductivity metal
+Al,300,101325,solid,225,FCC Al (Fm-3m 225)
+PbTe,300,101325,solid,225,Rocksalt PbTe (Fm-3m 225) classic thermoelectric (low κ)
+SnSe,300,101325,solid,62,Orthorhombic SnSe (Pnma 62) very low κ (anisotropic)
+BAs,300,101325,solid,216,Cubic boron arsenide (F-43m 216) ultra-high κ (caution: possible extrapolation)
+Ge,300,101325,solid,227,Diamond cubic Ge (Fd-3m 227)
+GaAs,300,101325,solid,216,Zinc blende GaAs (F-43m 216)
+BN,300,101325,solid,194,Hexagonal BN (P63/mmc 194) strongly anisotropic
+BN,300,101325,solid,216,Cubic BN (F-43m 216)
+CoSb3,300,101325,solid,204,Skutterudite CoSb3 (Im-3 204) thermoelectric
+HfNiSn,300,101325,solid,216,Half-Heusler HfNiSn (F-43m 216)

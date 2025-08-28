@@ -298,4 +298,28 @@ print(f"Final parity plot saved to {FINAL_PARITY_PATH}")
 # ### Next Steps:
 # 
 # The curated feature set stored in `selected_features_xgb.json` will now serve as the definitive input for the `5_hyperparameter_tuning.py` notebook. In the next and final modeling step, we will optimize the XGBoost model's hyperparameters to achieve the best possible performance with this validated feature set.
-
+# 
+# %% [markdown]
+# ## 8. Polymorph & Space Group Limitation (Current Model)
+# 
+# Although the inference script now accepts a user-supplied `space_group` to distinguish polymorphs (e.g., diamond vs graphite, hexagonal BN vs cubic BN), this trained model does **not** leverage polymorph information:
+# 
+# - The final selected feature set is composition-centric (elemental statistics, stoichiometry, electronic descriptors) and excludes explicit structure-derived fields (e.g., space group number, crystal system one-hot encodings, density from MP/JARVIS, site/bond statistics).
+# - As a result, different polymorphs with the same chemical formula produce identical feature vectors and identical predictions (e.g., C #227 vs C #194; BN #194 vs BN #216).
+# - High or extreme thermal conductivity materials (diamond, cubic BN, BAs, high-purity metals) are under-predicted because the training distribution is dominated by moderate κ compounds; the model regresses toward the central range it has “seen”.
+# 
+# ### When This Matters
+# - Benchmarking polymorph-sensitive systems (SiO₂ phase variants, TiO₂ rutile vs anatase, carbon allotropes) – current predictions will not separate them.
+# - Evaluating ultra high-κ conductors (diamond, BAs) or metallic heat spreaders (Cu, Al) – expect systematic underestimation.
+# 
+# ### Path to Incorporate Polymorph Sensitivity
+# 1. **Feature Augmentation:** Include structure-aware features (space group number, crystal system dummies, density, bonding/network topology, site statistics, Ewald energy, packing efficiency).
+# 2. **Consistent Inference:** Persist the added columns in `selected_features_xgb.json` after retraining so inference aligns.
+# 3. **Data Expansion:** Add representative high-κ metals and extreme phonon conductors to reduce extrapolation error.
+# 4. **Retrain & Validate:** Re-run this notebook with the augmented feature matrix; confirm polymorph pairs now diverge in predictions.
+# 
+# ### Interim User Guidance
+# - Providing `space_group` currently improves **traceability** (recorded in outputs) but not predictive differentiation.
+# - Flag results for out-of-domain materials (e.g., diamond, BAs) as qualitative estimates.
+# 
+# This section documents the present limitation transparently and outlines an actionable roadmap for a polymorph-aware next version.

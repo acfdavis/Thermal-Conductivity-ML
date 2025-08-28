@@ -115,3 +115,71 @@ Thermal-Conductivity-ML/
 ├── requirements.txt        # Python dependencies
 └── README.md               # Project overview
 ```
+
+## Example Predictions vs. Literature Values
+
+The table below compares model predictions (room temperature, ~300 K, 1 atm) for a small illustrative set of well-studied materials against typical literature thermal conductivity values. Literature values are approximate ranges; actual values depend on crystal quality, microstructure, stoichiometry, porosity, and anisotropy.
+
+| Material | Literature κ (W/m·K, ~300 K) | Source (typical) | Model Prediction (W/m·K) | Abs Error | Rel Error (%) | Notes |
+|----------|------------------------------|------------------|--------------------------|-----------|---------------|-------|
+| SiO₂ (fused) | 1.3–1.5 (amorphous) / 6–7 (α-quartz along a) | CRC / materials handbooks | 3.908 | +2.4 vs fused | +160% (fused ref) | Overpredicts low-κ amorphous; lacks microstructural/phase detail |
+| Bi₂Te₃ | 1.5–1.6 (polycryst.) | Thermoelectric literature | 3.984 | +2.4 | +150% | Overpredict; complexity & strong anharmonic scattering not fully captured |
+| GaN | 130–230 (bulk single crystal) | Wide bandgap semiconductor data | 80.262 | −50 to −150 | −38% (vs 130) | Underpredict; missing defect / crystal quality indicators |
+| SiC (poly / 4H) | 120–270 (4H, poly) | Semiconductor data | 123.917 | Near lower bound | ~0% (vs 124) | Reasonable; captures order of magnitude |
+| Si (single crystal) | 148–150 | Standard reference | 99.886 | −48 | −32% | Underpredict (phonon–phonon & isotope scattering under-modeled) |
+| SrTiO₃ | 10–12 | Perovskite oxide data | 8.178 | −2 | −18% | Slight underprediction; trend directionally correct |
+
+### Discussion
+
+Strengths:
+
+- Provides correct relative ordering separating very low (Bi₂Te₃, SiO₂) vs high (SiC, Si) vs intermediate (SrTiO₃) κ classes, except for magnitude inflation in the very low regime.
+- Captures that SiC > Si and both >> typical thermoelectrics/oxides.
+- Achieves errors within the same order of magnitude for all samples (no catastrophic failures).
+
+Limitations observed:
+
+- Systematically overestimates ultra–low conductivity materials (SiO₂ amorphous, Bi₂Te₃) and underestimates some high conductivity semiconductors (GaN, Si). This suggests the model is not fully capturing dominant phonon scattering mechanisms (point defects, anisotropy, microstructure, grain boundaries) that suppress or enhance κ.
+- Input features rely primarily on composition-derived statistical descriptors plus a subset of database-derived structural/elastic properties. Missing or sparse descriptors (e.g. Grüneisen parameter, phonon group velocity, defect concentrations, crystallinity, isotopic purity) limit absolute accuracy.
+
+Model usefulness:
+
+- Effective for rapid screening and prioritization: narrows candidate sets by conductivity class (low / moderate / high) before more expensive first-principles or experimental evaluation.
+- Supports materials design workflows where relative ranking matters more than exact absolute κ.
+- Acts as a feature importance interpreter (via SHAP) to highlight which elemental or structural factors drive predicted trends.
+
+Recommended future enhancements:
+
+1. Integrate phonon-informed proxies (e.g. predicted Debye temperature, average sound velocity, Grüneisen parameter) where available.
+2. Add structural complexity metrics (atoms per primitive cell, mass variance) and defect / vacancy descriptors if datasets permit.
+3. Calibrate a post-hoc correction model (e.g. isotonic regression) to debias systematic over/underestimation regions.
+4. Stratify training by material class (oxides, thermoelectrics, wide-bandgap semiconductors) and apply class-conditional models or multi-task learning.
+5. Incorporate uncertainty estimation (e.g. Monte Carlo dropout or ensemble variance) to communicate confidence alongside point predictions.
+
+> Disclaimer: Literature values are broad averages; for rigorous benchmarking, compile a curated reference dataset with matched measurement conditions (crystal phase, orientation, purity, density). The simple comparison here is illustrative only.
+
+## Handling Missing External Data
+
+If individual formulas lack JARVIS or Materials Project matches:
+- Missing feature columns are imputed (per-batch median, fallback 0) prior to scaling.
+- A log message lists imputed columns.
+- Rows are not dropped by default to preserve user input coverage.
+
+## Polymorph Alignment Logic
+
+When space_group is supplied:
+1. Materials Project query attempts to select an entry whose symmetry.space_group_number matches the user value.
+2. If no match exists, it falls back to the lowest energy entry (same behavior as before).
+3. crystal_structure is derived from the user space group (not the fallback proxy).
+4. A mismatch flag (internal) allows future auditing (not all flags are persisted in the final CSV).
+
+Limitations:
+- If the model was originally trained without explicit polymorph differentiation, changing space_group may yield modest or no prediction shifts.
+- Extreme materials (e.g., BAs, very low κ layered anisotropic compounds) may be outside the original training distribution; treat results as qualitative.
+
+## Recommended Best Practices
+
+- Always supply space_group when targeting a specific polymorph (diamond vs graphite, rutile vs anatase, etc.).
+- Use --skip-jarvis only when network/data access is constrained; otherwise keep full feature fidelity.
+- For benchmarking, compare predicted vs literature κ on a curated, diverse set (metals, high κ covalent, low κ thermoelectrics, perovskites,
+

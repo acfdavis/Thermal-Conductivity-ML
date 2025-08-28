@@ -29,7 +29,7 @@ from mp_api.client import MPRester
 from pymatgen.core import Composition, Structure
 from tqdm import tqdm
 
-from data import impute_and_clean_data, load_and_merge_data
+from .data import impute_and_clean_data, load_and_merge_data #remove "." when running notebook 4
 
 
 def featurize_data(df, composition_col='formula', cache_path=None):
@@ -61,6 +61,12 @@ def featurize_data(df, composition_col='formula', cache_path=None):
 
     print("Starting feature engineering...")
 
+    # Normalize accidental leading/trailing whitespace in column headers (e.g. ' space_group')
+    original_cols = df.columns.tolist()
+    df.columns = [c.strip() for c in df.columns]
+    if original_cols != df.columns.tolist():
+        print("Stripped whitespace from column names:", original_cols, "->", df.columns.tolist())
+
     if composition_col not in df.columns:
         raise ValueError(f"Composition column '{composition_col}' not found in DataFrame.")
 
@@ -78,14 +84,34 @@ def featurize_data(df, composition_col='formula', cache_path=None):
     else:
         print("Materials Project API key not found. Skipping these features.")
 
-    df_jarvis = add_jarvis_features(df_comp)
-    print("JARVIS features added.")
+    skip_jarvis = os.getenv("TCML_SKIP_JARVIS") == "1"
+    if skip_jarvis:
+        print("Skipping JARVIS feature retrieval (TCML_SKIP_JARVIS=1).")
+        df_jarvis = df_comp.copy()
+    else:
+        df_jarvis = add_jarvis_features(df_comp)
+        print("JARVIS features added.")
 
     # Add chemistry column using classify_material on formula
     df_jarvis['chemistry'] = df_jarvis[composition_col].apply(classify_material)
 
-    # Add crystal_structure column using a more robust approach
-    df_jarvis['crystal_structure'] = df_jarvis['MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
+    # Determine crystal structure. If user supplied an explicit space_group column (1-230), prefer that.
+    user_sg_col = None
+    for cand in ['space_group', 'space_group_number', 'spacegroup', 'spacegroup_number']:
+        if cand in df_jarvis.columns:
+            user_sg_col = cand
+            break
+
+    if user_sg_col:
+        # Coerce to numeric safely
+        df_jarvis[user_sg_col] = pd.to_numeric(df_jarvis[user_sg_col], errors='coerce')
+        df_jarvis['crystal_structure'] = df_jarvis[user_sg_col].apply(classify_spacegroup_by_number)
+        df_jarvis.rename(columns={user_sg_col: 'user_space_group_number'}, inplace=True)
+        print(f"Used user-provided space group numbers from column '{user_sg_col}' to assign crystal_structure.")
+    else:
+        # Fallback to Magpie-derived mean space group number
+        df_jarvis['crystal_structure'] = df_jarvis['MagpieData_mean_SpaceGroupNumber'].apply(classify_spacegroup_by_number)
+        print("Assigned crystal_structure from MagpieData_mean_SpaceGroupNumber (no user space_group provided).")
 
     # Initialize the column with 'Unknown'
     #df_jarvis['crystal_structure'] = 'Unknown'
@@ -185,125 +211,158 @@ def normalize_column_names(df):
 
 def add_materials_project_features(df, api_key):
     """
-    Enriches the DataFrame with materials properties from the Materials Project,
-    including crystal system and spacegroup.
+    Enriches the DataFrame with materials properties from the Materials Project on a
+    ROW-BY-ROW basis to handle polymorphs correctly.
 
-    Args:
-        df (pd.DataFrame): DataFrame with a 'formula' column.
-        api_key (str): Your Materials Project API key.
-
-    Returns:
-        pd.DataFrame: DataFrame with added features.
+    For each row, it attempts to find a structure in Materials Project that matches
+    both the formula and the user-provided space group. If no exact match is found,
+    it falls back to the lowest-energy polymorph for that formula.
     """
     from mp_api.client import MPRester
     from tqdm import tqdm
 
     materials_data_list = []
+    print(f"Starting row-by-row Materials Project query for {len(df)} entries...")
+
     with MPRester(api_key=api_key) as mpr:
-        unique_formulas = df["formula"].unique()
-        print(f"Starting Materials Project query for {len(unique_formulas)} unique formulas...")
+        # Use tqdm to iterate with a progress bar
+        for index, row in tqdm(df.iterrows(), total=df.shape[0], desc="Querying MP"):
+            formula = row['formula']
+            # Use the already-normalized space group column if it exists
+            user_sg = row.get('user_space_group_number')
 
-        batch_size = 100
-        for i in tqdm(range(0, len(unique_formulas), batch_size), desc="Fetching Materials Project Data"):
-            batch_formulas = unique_formulas[i:i+batch_size]
-            try:
-                docs = mpr.materials.summary.search(
-                    formula=list(batch_formulas),
-                    fields=[
-                        "material_id", "formula_pretty", "density", "volume",
-                        "band_gap", "is_metal", "energy_above_hull", "symmetry"
-                    ]
-                )
+            docs = []
+            # 1. Try to find an exact match for formula AND space group
+            if pd.notna(user_sg):
+                try:
+                    docs = mpr.materials.summary.search(
+                        formula=formula,
+                        symmetry_space_group_number=int(user_sg),
+                        fields=["material_id", "formula_pretty", "density", "volume",
+                                "band_gap", "is_metal", "energy_above_hull", "symmetry"]
+                    )
+                except Exception:
+                    docs = [] # Query failed, proceed to fallback
 
-                docs_by_formula = {}
-                for doc in docs:
-                    f = doc.formula_pretty
-                    # Get the current best doc for this formula
-                    current_best_doc = docs_by_formula.get(f)
-                    
-                    # If there is no doc yet, or the new doc is better, update
-                    if not current_best_doc or (
-                        getattr(doc, 'energy_above_hull', float('inf')) <
-                        getattr(current_best_doc, 'energy_above_hull', float('inf'))
-                    ):
-                        docs_by_formula[f] = doc
+            # 2. Fallback: If no exact match, query by formula only
+            if not docs:
+                try:
+                    docs = mpr.materials.summary.search(
+                        formula=formula,
+                        fields=["material_id", "formula_pretty", "density", "volume",
+                                "band_gap", "is_metal", "energy_above_hull", "symmetry"]
+                    )
+                except Exception as e:
+                    print(f"Warning: MP query failed for formula {formula}: {e}")
+                    docs = []
 
-                for doc in docs_by_formula.values():
-                    symmetry = getattr(doc, "symmetry", None)
-                    materials_data_list.append({
-                        "formula": doc.formula_pretty,
-                        "mp_formula": doc.formula_pretty,
-                        "material_id": str(doc.material_id),
-                        "mp_density": getattr(doc, "density", None),
-                        "mp_volume": getattr(doc, "volume", None),
-                        "mp_band_gap": getattr(doc, "band_gap", None),
-                        "mp_is_metal": getattr(doc, "is_metal", None),
-                        "mp_energy_above_hull": getattr(doc, "energy_above_hull", None),
-                        "crystal_system": getattr(symmetry, "crystal_system", None).name if symmetry and hasattr(symmetry, "crystal_system") and hasattr(getattr(symmetry, "crystal_system"), "name") else None,
-                        "mp_spacegroup": getattr(symmetry, "symbol", None) if symmetry else None,
-                    })
-            except Exception as e:
-                print(f"An error occurred during Materials Project query for batch {i//batch_size + 1}: {e}")
+            # 3. Process the results
+            if docs:
+                # Pick the best available structure (lowest energy above hull)
+                docs.sort(key=lambda d: getattr(d, "energy_above_hull", float("inf")))
+                chosen = docs[0]
+                symm = getattr(chosen, "symmetry", None)
+                
+                # Check if the chosen structure matches the user's requested space group
+                mp_sg = getattr(symm, "space_group_number", None)
+                sg_match = pd.notna(user_sg) and pd.notna(mp_sg) and int(user_sg) == int(mp_sg)
 
-    print(f"Finished Materials Project query. Fetched data for {len(materials_data_list)} materials.")
+                materials_data_list.append({
+                    "mp_formula": chosen.formula_pretty,
+                    "material_id": str(chosen.material_id),
+                    "mp_density": getattr(chosen, "density", None),
+                    "mp_volume": getattr(chosen, "volume", None),
+                    "mp_band_gap": getattr(chosen, "band_gap", None),
+                    "mp_is_metal": getattr(chosen, "is_metal", None),
+                    "mp_energy_above_hull": getattr(chosen, "energy_above_hull", None),
+                    "crystal_system": getattr(symm, "crystal_system", None).name if symm and getattr(symm, "crystal_system", None) else None,
+                    "mp_spacegroup_number": mp_sg,
+                    "mp_spacegroup_match_user": sg_match
+                })
+            else:
+                # Append a dictionary of NaNs if no data was found
+                materials_data_list.append({col: None for col in [
+                    "mp_formula", "material_id", "mp_density", "mp_volume", "mp_band_gap",
+                    "mp_is_metal", "mp_energy_above_hull", "crystal_system", "mp_spacegroup_number",
+                    "mp_spacegroup_match_user"
+                ]})
 
+    print(f"Finished Materials Project query. Processed {len(materials_data_list)} rows.")
     if materials_data_list:
-        mp_df = pd.DataFrame(materials_data_list)
-        # Use the original formula for merging to handle any inconsistencies
-        df = pd.merge(df, mp_df, on="formula", how="left")
+        mp_df = pd.DataFrame(materials_data_list, index=df.index)
+        df = pd.concat([df, mp_df], axis=1)
 
     return df
 
 
 def add_jarvis_features(df):
     """
-    Enrich the dataframe with thermal-transport-relevant features from the JARVIS-DFT database.
-    Includes density, elastic constants, bond lengths, packing, anisotropy, etc.
+    Enrich the dataframe with features from JARVIS-DFT on a ROW-BY-ROW basis.
+    It prioritizes structures matching the user-provided space group.
     """
+    from pymatgen.core import Structure
+    from tqdm import tqdm
+
+    # Pre-process the JARVIS database for efficient lookup
     jdft_3d = jdata('dft_3d')
-    formula_to_jarvis = {item['formula']: item for item in jdft_3d}
-    jarvis_data = []
-    formulas = df['formula'].unique()
-    for formula in tqdm(formulas, desc="Fetching JARVIS Data"):
-        if formula in formula_to_jarvis:
-            item = formula_to_jarvis[formula]
-            # Compute density from structure
+    formula_to_jarvis_list = {}
+    for item in jdft_3d:
+        formula = item['formula']
+        if formula not in formula_to_jarvis_list:
+            formula_to_jarvis_list[formula] = []
+        formula_to_jarvis_list[formula].append(item)
+
+    jarvis_data_list = []
+    print(f"Starting row-by-row JARVIS query for {len(df)} entries...")
+
+    for index, row in tqdm(df.iterrows(), total=df.shape[0], desc="Fetching JARVIS Data"):
+        formula = row['formula']
+        user_sg = row.get('user_space_group_number')
+        
+        candidates = formula_to_jarvis_list.get(formula, [])
+        chosen_item = None
+
+        # 1. Try to find an exact match for formula AND space group
+        if pd.notna(user_sg) and candidates:
+            sg_matched = [item for item in candidates if item.get('spacegroup_number') == int(user_sg)]
+            if sg_matched:
+                # Among matches, pick lowest formation energy
+                sg_matched.sort(key=lambda item: item.get('formation_energy_peratom', float('inf')))
+                chosen_item = sg_matched[0]
+
+        # 2. Fallback: If no exact match, pick the lowest formation energy polymorph
+        if chosen_item is None and candidates:
+            candidates.sort(key=lambda item: item.get('formation_energy_peratom', float('inf')))
+            chosen_item = candidates[0]
+
+        # 3. Process the chosen item
+        if chosen_item:
             try:
-                structure = Structure.from_dict(item['atoms'])
-                density_val = structure.density  # g/cm^3
+                structure = Structure.from_dict(chosen_item['atoms'])
+                density_val = structure.density
             except Exception:
                 density_val = None
-            jarvis_data.append({
-                'formula': formula,
-                'jarvis_bulk_modulus': item.get('bulk_modulus_vrh'),
-                'jarvis_shear_modulus': item.get('shear_modulus_vrh'),
-                'jarvis_band_gap': item.get('optb88vdw_bandgap'),
-                'jarvis_formation_energy': item.get('formation_energy_peratom'),
-                'jarvis_debye_temp': item.get('debye_temp'),
+            
+            jarvis_data_list.append({
+                'jarvis_bulk_modulus': chosen_item.get('bulk_modulus_vrh'),
+                'jarvis_shear_modulus': chosen_item.get('shear_modulus_vrh'),
+                'jarvis_band_gap': chosen_item.get('optb88vdw_bandgap'),
+                'jarvis_formation_energy': chosen_item.get('formation_energy_peratom'),
+                'jarvis_debye_temp': chosen_item.get('debye_temp'),
                 'jarvis_density': density_val,
-                'jarvis_avg_mass': item.get('avg_mass'),
-                'jarvis_natoms': item.get('natoms'),
-                'jarvis_packing_fraction': item.get('packing_fraction'),
-                'jarvis_min_bond_length': item.get('min_bond_length'),
-                'jarvis_avg_bond_length': item.get('avg_bond_length'),
-                'jarvis_elastic_anisotropy': item.get('elastic_anisotropy'),
-                'jarvis_is_metal': item.get('is_metal'),
-                'jarvis_eps_electronic': item.get('eps_electronic'),
-                'jarvis_eps_total': item.get('eps_total')
             })
-    results_df = pd.DataFrame(jarvis_data)
-    if not results_df.empty:
-        results_df.dropna(
-            how='all',
-            subset=[
+        else:
+            # Append a dictionary of NaNs if no data was found
+            jarvis_data_list.append({col: None for col in [
                 'jarvis_bulk_modulus', 'jarvis_shear_modulus', 'jarvis_band_gap',
-                'jarvis_formation_energy', 'jarvis_debye_temp', 'jarvis_density',
-                'jarvis_avg_mass', 'jarvis_natoms', 'jarvis_packing_fraction'
-            ],
-            inplace=True
-        )
-        df = pd.merge(df, results_df, on='formula', how='left')
-    print(f"Successfully fetched data for {len(results_df)} of {len(formulas)} unique formulas from JARVIS.")
+                'jarvis_formation_energy', 'jarvis_debye_temp', 'jarvis_density'
+            ]})
+
+    print(f"Finished JARVIS query. Processed {len(jarvis_data_list)} rows.")
+    if jarvis_data_list:
+        jarvis_df = pd.DataFrame(jarvis_data_list, index=df.index)
+        df = pd.concat([df, jarvis_df], axis=1)
+
     return df
 
 

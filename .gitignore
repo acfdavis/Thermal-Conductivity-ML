@@ -9,7 +9,7 @@ __pycache__/
 # Data
 data/raw/
 data/processed/
-*.csv
+
 
 # VS Code
 .vscode/
